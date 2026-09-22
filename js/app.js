@@ -14,6 +14,7 @@ import { PRECISION_DEFAULTS, validatePrecisionPreferences } from "./precision.js
 import { SYSTEM_DEFAULTS, SYSTEM_STORAGE_KEY, validateSystemPreferences, performancePresetPatch, inferPerformancePreset } from "./systemPreferences.js";
 import { createInteractionEngine, validInteractionHand } from "./interactionEngine.js";
 import { createSpatialMode } from "./spatialMode.js";
+import { createLearnMode, onboardingCompleted, markOnboardingCompleted } from "./learnMode.js";
 
 const PRECISION_STORAGE_KEY = "voids-vision.settings.precision.v1";
 
@@ -22,6 +23,11 @@ const MODES = {
     label: "HOME", title: "Home / HUD",
     description: "Your touchless interaction workspace.",
     hints: ["INDEX ONLY · Pointer", "PINCH · Select", "PINCH + DRAG · Panel scroll", "FIST · Pause"]
+  },
+  learn: {
+    label: "DEMO / LEARN", title: "Demo / Learn",
+    description: "Learn the controls with live gesture feedback.",
+    hints: ["LIVE DEMO · Follow steps", "PRACTICE · Real detections", "GUIDE · Quick reference"]
   },
   pointer: {
     label: "POINTER", title: "Pointer control",
@@ -46,7 +52,7 @@ const MODES = {
   spatial: {
     label: "SPATIAL / HOLO", title: "Spatial / Holo",
     description: "Create and arrange shapes in your camera workspace.",
-    hints: ["INDEX ONLY · Aim", "FIRST GRAB · Anchor", "OTHER HAND · Join / release", "PINCH + DRAG · Panel scroll"]
+    hints: ["INDEX ONLY · Aim", "FIRST GRAB · Anchor", "OTHER HAND ANYWHERE · Pinch transform", "PINCH + DRAG · Panel scroll"]
   },
   challenge: {
     label: "CHALLENGE", title: "Challenge",
@@ -56,14 +62,44 @@ const MODES = {
 };
 
 const HAND_TRACKING = Object.freeze({
-  confirmMs: 200,
-  lostMs: 300,
-  retainMs: 1000,
-  maxMatchDistance: 0.25,
-  newHandCost: 0.45,
-  handednessPenalty: 0.22,
-  ambiguityMargin: 0.03
+  // Base timing targets. Low-FPS cameras use the adaptive helpers below so two
+  // genuine samples can reacquire a hand without making 30 FPS tracking loose.
+  confirmMs: 170,
+  lowFpsConfirmMs: 110,
+  lostMs: 430,
+  lowFpsLostMs: 620,
+  retainMs: 1250,
+  lowFpsRetainMs: 1650,
+  maxMatchDistance: 0.29,
+  newHandCost: 0.50,
+  handednessPenalty: 0.24,
+  sizePenalty: 0.10,
+  ambiguityMargin: 0.018
 });
+
+function trackingFps() {
+  if (Number.isFinite(state.performance.fps)) return state.performance.fps;
+  const interval = state.performance?.profile?.inferenceIntervalMs;
+  return Number.isFinite(interval) && interval > 0 ? 1000 / interval : null;
+}
+function adaptiveConfirmMs() {
+  const fps = trackingFps();
+  if (fps !== null && fps < 12) return HAND_TRACKING.lowFpsConfirmMs;
+  if (fps !== null && fps < 18) return 140;
+  return HAND_TRACKING.confirmMs;
+}
+function adaptiveLostMs() {
+  const fps = trackingFps();
+  if (fps !== null && fps < 12) return HAND_TRACKING.lowFpsLostMs;
+  if (fps !== null && fps < 18) return 520;
+  return HAND_TRACKING.lostMs;
+}
+function adaptiveRetainMs() {
+  const fps = trackingFps();
+  if (fps !== null && fps < 12) return HAND_TRACKING.lowFpsRetainMs;
+  if (fps !== null && fps < 18) return 1450;
+  return HAND_TRACKING.retainMs;
+}
 
 const state = {
   currentMode: "home",
@@ -116,21 +152,49 @@ function palmCenter(landmarks) {
   return center;
 }
 
-function associateHands(detections, previous, aspect) {
+// A small shape signature helps keep H1/H2 identity stable when palms cross.
+// It is intentionally weak: perspective changes hand size, so position,
+// velocity and MediaPipe handedness still dominate association.
+function palmAssociationScale(landmarks, aspect = 1) {
+  const wrist = landmarks?.[0], middle = landmarks?.[9], index = landmarks?.[5], pinky = landmarks?.[17];
+  if (![wrist, middle, index, pinky].every(Boolean)) return null;
+  const distance = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * aspect);
+  const length = distance(wrist, middle), width = distance(index, pinky);
+  const scale = 0.62 * length + 0.38 * width;
+  return Number.isFinite(scale) && scale > 1e-4 ? scale : null;
+}
+
+function associateHands(detections, previous, aspect, now) {
   if (!detections.length) return { mapping: [], ambiguous: [] };
 
   function matchCost(detection, hand) {
+    const dt = Math.max(0, Math.min(0.35, (now - (hand.tracking?.lastSeenAt ?? now)) / 1000));
+    const v = hand.tracking?.associationVelocity || { x: 0, y: 0 };
+    const velocityWeight = dt <= 0.22 ? 1 : Math.max(0, 1 - (dt - 0.22) / 0.13);
+    const predicted = {
+      x: hand.palmCenter.x + v.x * dt * velocityWeight,
+      y: hand.palmCenter.y + v.y * dt * velocityWeight
+    };
     const distance = Math.hypot(
-      detection.palmCenter.x - hand.palmCenter.x,
-      (detection.palmCenter.y - hand.palmCenter.y) * aspect
+      detection.palmCenter.x - predicted.x,
+      (detection.palmCenter.y - predicted.y) * aspect
     );
-    if (distance > HAND_TRACKING.maxMatchDistance) return Infinity;
+    // At low camera FPS a legitimate fast movement can travel >25% of the
+    // normalized frame between samples. Predict from recent palm velocity and
+    // allow a bounded gap-dependent margin so H1/H2 identity does not reset.
+    const dynamicLimit = HAND_TRACKING.maxMatchDistance + Math.min(0.12, dt * 0.65);
+    if (distance > dynamicLimit) return Infinity;
     const different = detection.handedness && hand.handedness &&
       detection.handedness !== hand.handedness;
     const weight = Math.min(
       detection.handednessScore ?? 0, hand.handednessScore ?? 0
     );
-    return distance + (different ? HAND_TRACKING.handednessPenalty * weight : 0);
+    const previousScale = hand.associationScale;
+    const scaleCost = Number.isFinite(detection.associationScale) && Number.isFinite(previousScale) &&
+      detection.associationScale > 0 && previousScale > 0
+      ? Math.min(0.35, Math.abs(Math.log(detection.associationScale / previousScale))) * HAND_TRACKING.sizePenalty
+      : 0;
+    return distance + scaleCost + (different ? HAND_TRACKING.handednessPenalty * weight : 0);
   }
 
   // With at most two detections, enumerate the few one-to-one assignments.
@@ -157,7 +221,10 @@ function associateHands(detections, previous, aspect) {
   );
 
   return {
-    mapping: best.mapping.map((index, i) => ambiguous[i] ? -1 : index),
+    // Preserve the best one-to-one identity even when two assignments are very
+    // close. `ambiguous` pauses gestures/actions until the picture is clear;
+    // inventing a new H-ID here used to reset pinch state and break transforms.
+    mapping: best.mapping,
     ambiguous
   };
 }
@@ -175,8 +242,10 @@ function initialize() {
   state.readiness.gestureEngineReady = gestureEngine.ready;
   let startupController = null;
   const loop = {
-    id: 0, token: 0, lastVideoTime: -1, lastProcessAt: -Infinity,
-    lastFreshAt: 0, windowStart: 0, frames: 0, lastHUD: 0, stalled: false, inFlight: false
+    id: 0, sourceId: null, sourceKind: "RAF", token: 0,
+    lastVideoTime: -1, lastSourceTime: -1, lastProcessAt: -Infinity,
+    lastFreshAt: 0, windowStart: 0, frames: 0, lastHUD: 0, stalled: false, inFlight: false,
+    lastSourceAt: null, sourceIntervalMs: null, lastInferenceAt: null, inferenceIntervalMs: null
   };
 
   const camera = new CameraController(ui.video, {
@@ -301,6 +370,7 @@ function initialize() {
   modeContext.interaction = interaction;
   modes.pointer = createPointerMode(modeContext);
   modes.home = modes.pointer;
+  modes.learn = createLearnMode(modeContext);
   modes["air-draw"] = createAirDrawMode(modeContext);
   modes.presentation = createPresentationMode(modeContext);
   modes["gesture-lab"] = createGestureLab(modeContext);
@@ -621,7 +691,7 @@ function initialize() {
       if (timing.candidateSince === null) timing.candidateSince = now;
       if (timing.everTracked) setTracking("REACQUIRING");
       else setTracking("SEARCHING");
-      if (now - timing.candidateSince >= HAND_TRACKING.confirmMs) {
+      if (now - timing.candidateSince >= adaptiveConfirmMs()) {
         timing.everTracked = true;
         setTracking("TRACKING");
       }
@@ -629,41 +699,70 @@ function initialize() {
       timing.candidateSince = null;
       if (!timing.everTracked) setTracking("SEARCHING");
       else if (state.trackingState === "REACQUIRING" ||
-               now - timing.lastSeenAt >= HAND_TRACKING.lostMs) setTracking("LOST");
+               now - timing.lastSeenAt >= adaptiveLostMs()) setTracking("LOST");
     }
   }
 
   function updateHands(sample, now) {
     const previous = state.hands.filter((hand) =>
-      now - hand.tracking.lastSeenAt <= HAND_TRACKING.retainMs
+      now - hand.tracking.lastSeenAt <= adaptiveRetainMs()
     );
-    const detections = sample.hands.map((hand) => ({
-      ...hand, palmCenter: palmCenter(hand.landmarks)
-    }));
     const aspect = state.camera.height / state.camera.width;
-    const { mapping, ambiguous } = associateHands(detections, previous, aspect);
+    const detections = sample.hands.map((hand) => ({
+      ...hand,
+      palmCenter: palmCenter(hand.landmarks),
+      associationScale: palmAssociationScale(hand.landmarks, aspect)
+    }));
+    const { mapping, ambiguous } = associateHands(detections, previous, aspect, now);
     const used = new Set(mapping.filter((index) => index !== -1));
     const visibleHands = detections.map((detection, index) => {
       const hand = mapping[index] === -1 ? {
         id: "H" + state.runtime.nextHandId++,
         tracking: {
           state: "SEARCHING", visible: false, ambiguous: false,
-          firstSeenAt: now, lastSeenAt: now, continuousSince: null,
-          everTracked: false, framesObserved: 0
+          firstSeenAt: now, lastSeenAt: now, continuousSince: null, continuousFrames: 0,
+          everTracked: false, framesObserved: 0, associationVelocity: { x: 0, y: 0 }
         },
         gesture: emptyGesture(),
         fingerStates: null, pinchDistance: null, movementDirection: null
       } : previous[mapping[index]];
       const tracking = hand.tracking;
-      if (tracking.continuousSince === null || now - tracking.lastSeenAt > SIGNAL_TUNING.graceMs) tracking.continuousSince = now;
+      if (tracking.continuousSince === null || now - tracking.lastSeenAt > Math.max(SIGNAL_TUNING.graceMs, 360)) {
+        tracking.continuousSince = now;
+        tracking.continuousFrames = 0;
+      }
+      const previousPalm = hand.palmCenter;
+      const previousAssociationScale = hand.associationScale;
+      const associationDt = Math.max(0.001, Math.min(0.35, (now - tracking.lastSeenAt) / 1000));
+      if (previousPalm && Number.isFinite(previousPalm.x) && Number.isFinite(previousPalm.y)) {
+        const ivx = (detection.palmCenter.x - previousPalm.x) / associationDt;
+        const ivy = (detection.palmCenter.y - previousPalm.y) / associationDt;
+        const speed = Math.hypot(ivx, ivy);
+        const cap = speed > 3.2 ? 3.2 / speed : 1;
+        const current = tracking.associationVelocity || { x: 0, y: 0 };
+        tracking.associationVelocity = {
+          x: current.x * 0.45 + ivx * cap * 0.55,
+          y: current.y * 0.45 + ivy * cap * 0.55
+        };
+      } else tracking.associationVelocity = { x: 0, y: 0 };
       Object.assign(hand, detection);
       tracking.visible = true;
       tracking.ambiguous = ambiguous[index];
       tracking.lastSeenAt = now;
       tracking.framesObserved += 1;
-      if (tracking.ambiguous) tracking.continuousSince = null;
+      if (Number.isFinite(detection.associationScale)) {
+        hand.associationScale = Number.isFinite(previousAssociationScale)
+          ? previousAssociationScale * 0.72 + detection.associationScale * 0.28
+          : detection.associationScale;
+      }
+      if (tracking.ambiguous) {
+        tracking.continuousSince = null;
+        tracking.continuousFrames = 0;
+      } else {
+        tracking.continuousFrames = (tracking.continuousFrames || 0) + 1;
+      }
       const stable = tracking.continuousSince !== null &&
-        now - tracking.continuousSince >= HAND_TRACKING.confirmMs;
+        tracking.continuousFrames >= 2 && now - tracking.continuousSince >= adaptiveConfirmMs();
       tracking.state = stable ? "TRACKING"
         : tracking.everTracked ? "REACQUIRING" : "SEARCHING";
       if (stable) tracking.everTracked = true;
@@ -674,10 +773,13 @@ function initialize() {
     for (const hand of missingHands) {
       const tracking = hand.tracking;
       tracking.visible = false;
-      if (now - tracking.lastSeenAt > SIGNAL_TUNING.graceMs) tracking.continuousSince = null;
+      if (now - tracking.lastSeenAt > SIGNAL_TUNING.graceMs) {
+        tracking.continuousSince = null;
+        tracking.continuousFrames = 0;
+      }
       if (tracking.everTracked &&
           (tracking.state === "REACQUIRING" ||
-           now - tracking.lastSeenAt >= HAND_TRACKING.lostMs)) tracking.state = "LOST";
+           now - tracking.lastSeenAt >= adaptiveLostMs())) tracking.state = "LOST";
       hand.landmarks = [];
       hand.worldLandmarks = [];
       hand.sourceIndex = null;
@@ -702,6 +804,11 @@ function initialize() {
     loop.token += 1;
     cancelAnimationFrame(loop.id);
     loop.id = 0;
+    if (loop.sourceId !== null) {
+      if (loop.sourceKind === "VIDEO_FRAME_CALLBACK") ui.video.cancelVideoFrameCallback?.(loop.sourceId);
+      else cancelAnimationFrame(loop.sourceId);
+    }
+    loop.sourceId = null;
   }
 
   function stopPipeline(message = "Camera stopped. Webcam tracks released.", silent = false) {
@@ -742,12 +849,18 @@ function initialize() {
     stopLoop();
     startModeClock();
     const token = loop.token;
-    const now = performance.now();
-    profile.start(ui.video, now);
+    const startedAt = performance.now();
+    profile.start(ui.video, startedAt);
     Object.assign(loop, {
-      lastVideoTime: -1, lastProcessAt: -Infinity, lastFreshAt: now,
-      windowStart: now, frames: 0, lastHUD: 0, stalled: false
+      lastVideoTime: -1, lastSourceTime: -1, lastProcessAt: -Infinity, lastFreshAt: startedAt,
+      windowStart: startedAt, frames: 0, lastHUD: 0, stalled: false, inFlight: false,
+      lastSourceAt: null, sourceIntervalMs: null, lastInferenceAt: null, inferenceIntervalMs: null,
+      sourceKind: typeof ui.video.requestVideoFrameCallback === "function" ? "VIDEO_FRAME_CALLBACK" : "RAF_FALLBACK",
+      sourceId: null
     });
+    profile.data.inferenceScheduler = loop.sourceKind;
+    profile.data.sourceFrameIntervalMs = null;
+    profile.data.inferenceIntervalMs = null;
     state.readiness.trackerReady = false;
     state.performance.fps = null;
     state.performance.inferenceLatencyMs = null;
@@ -755,113 +868,152 @@ function initialize() {
     setTracking(state.runtime.tracking.everTracked ? "LOST" : "SEARCHING");
     render();
 
-    function frame() {
+    function processFreshFrame(callbackAt, sourceTimeMs = null) {
+      if (token !== loop.token || document.hidden || !camera.running || loop.inFlight) return;
+      const video = ui.video;
+      if (video.readyState < 2 || video.paused || !video.videoWidth || !video.videoHeight) return;
+
+      const sourceTime = Number.isFinite(sourceTimeMs) ? sourceTimeMs : video.currentTime * 1000;
+      if (!Number.isFinite(sourceTime) || sourceTime === loop.lastSourceTime) return;
+      if (loop.lastSourceAt !== null && sourceTime > loop.lastSourceAt) {
+        loop.sourceIntervalMs = sourceTime - loop.lastSourceAt;
+        profile.data.sourceFrameIntervalMs = loop.sourceIntervalMs;
+      }
+      loop.lastSourceAt = sourceTime;
+      loop.lastSourceTime = sourceTime;
+
+      // Even a 60 FPS webcam does not need more than ~30 expensive landmark
+      // inferences per second. requestVideoFrameCallback still gives us the
+      // freshest available frame instead of polling the same frame from RAF.
+      const now = performance.now();
+      if (now - loop.lastProcessAt < 1000 / 30 - 1) return;
+      loop.lastProcessAt = now;
+      if (loop.lastInferenceAt !== null) {
+        loop.inferenceIntervalMs = now - loop.lastInferenceAt;
+        profile.data.inferenceIntervalMs = loop.inferenceIntervalMs;
+      }
+      loop.lastInferenceAt = now;
+
+      const pipelineAt = performance.now();
+      let sample;
+      loop.inFlight = true; profile.inferenceStarted();
+      try { sample = tracker.detect(video, now); }
+      finally { loop.inFlight = false; profile.inferenceEnded(); }
+      if (!sample || token !== loop.token) return;
+
+      const freshAt = performance.now();
+      loop.lastFreshAt = freshAt;
+      loop.stalled = false;
+      loop.frames += 1;
+      const elapsed = freshAt - loop.windowStart;
+      if (elapsed >= 1000) {
+        state.performance.fps = loop.frames * 1000 / elapsed;
+        loop.frames = 0;
+        loop.windowStart = freshAt;
+        // Reduce decoration only; never weaken gesture correctness or disable H2.
+        if (state.performance.fps < 22) {
+          quality.lowSince ??= freshAt; quality.healthySince = null;
+          const protectionDelay = state.performance.fps < 10 ? 700 : state.performance.fps < 16 ? 1500 : 3000;
+          if (freshAt - quality.lowSince >= protectionDelay) state.performance.effectsReduced = true;
+        } else {
+          quality.lowSince = null;
+          if (state.performance.fps >= 26) {
+            quality.healthySince ??= freshAt;
+            if (freshAt - quality.healthySince >= 8000) state.performance.effectsReduced = false;
+          } else quality.healthySince = null;
+        }
+      }
+
+      state.performance.inferenceLatencyMs = sample.latencyMs;
+      profile.record("inference", sample.latencyMs);
+      const reduced = state.settings.visualEffects === "reduced" ||
+        (state.settings.autoPerformanceMode && state.performance.effectsReduced);
+      state.performance.mode = reduced ? "REDUCED_EFFECTS" : "MEASURING";
+      state.camera.width = video.videoWidth;
+      state.camera.height = video.videoHeight;
+      const associationAt = performance.now();
+      updateHands(sample, freshAt);
+      profile.record("association", performance.now() - associationAt);
+      const gestureAt = performance.now();
+      const gestureEvents = updateGestureData(freshAt);
+      profile.record("gestures", performance.now() - gestureAt);
+
+      if (!state.readiness.trackerReady) {
+        state.readiness.trackerReady = true;
+        state.runtime.busy = false;
+        startupController = null;
+        setStage("READY", state.runtime.gestureError
+          ? "Camera tracking ready. Gesture diagnostics require a retry."
+          : "Two-hand tracking and gesture engine ready. Open a mode to interact.");
+      }
+      const interactionAt = performance.now();
+      runModeFrame(gestureEvents, freshAt, reduced);
+      profile.record("interaction", performance.now() - interactionAt);
+      const overlayAt = performance.now();
+      ui.drawHands(state.hands, tracker.connections, state.settings,
+        state.handInput.primaryHandId, reduced);
+      profile.record("overlay", performance.now() - overlayAt);
+      profile.record("pipeline", performance.now() - pipelineAt);
+    }
+
+    function scheduleVideoFrame() {
+      if (token !== loop.token || document.hidden || !camera.running) return;
+      const video = ui.video;
+      if (loop.sourceKind === "VIDEO_FRAME_CALLBACK") {
+        loop.sourceId = video.requestVideoFrameCallback((at, metadata) => {
+          loop.sourceId = null;
+          try {
+            processFreshFrame(at, Number.isFinite(metadata?.mediaTime) ? metadata.mediaTime * 1000 : null);
+          } catch (error) {
+            failPipeline("Hand tracking failed: " + error.message, true);
+            return;
+          }
+          scheduleVideoFrame();
+        });
+      } else {
+        loop.sourceId = requestAnimationFrame(() => {
+          loop.sourceId = null;
+          try { processFreshFrame(performance.now(), ui.video.currentTime * 1000); }
+          catch (error) { failPipeline("Hand tracking failed: " + error.message, true); return; }
+          scheduleVideoFrame();
+        });
+      }
+    }
+
+    function housekeeping() {
       if (token !== loop.token || document.hidden) return;
       loop.id = 0;
       if (!camera.running) {
         failPipeline("The camera is no longer available. Reconnect it and retry.");
         return;
       }
-
-      try {
-        let now = performance.now();
-        const video = ui.video;
-        if (!loop.inFlight && video.readyState >= 2 && !video.paused &&
-            video.currentTime !== loop.lastVideoTime &&
-            now - loop.lastProcessAt >= 1000 / 30 - 1) {
-          loop.lastVideoTime = video.currentTime;
-          loop.lastProcessAt = now;
-          const pipelineAt = performance.now();
-          let sample;
-          loop.inFlight = true; profile.inferenceStarted();
-          try { sample = tracker.detect(video, now); }
-          finally { loop.inFlight = false; profile.inferenceEnded(); }
-
-          if (sample) {
-            now = performance.now();
-            loop.lastFreshAt = now;
-            loop.stalled = false;
-            loop.frames += 1;
-            const elapsed = now - loop.windowStart;
-            if (elapsed >= 1000) {
-              state.performance.fps = loop.frames * 1000 / elapsed;
-              loop.frames = 0;
-              loop.windowStart = now;
-              // Reduce only decoration; keep two hands and detection thresholds.
-              if (state.performance.fps < 22) {
-                quality.lowSince ??= now; quality.healthySince = null;
-                if (now - quality.lowSince >= 3000) state.performance.effectsReduced = true;
-              } else {
-                quality.lowSince = null;
-                if (state.performance.fps >= 26) {
-                  quality.healthySince ??= now;
-                  if (now - quality.healthySince >= 8000) state.performance.effectsReduced = false;
-                } else quality.healthySince = null;
-              }
-            }
-
-            state.performance.inferenceLatencyMs = sample.latencyMs;
-            profile.record("inference", sample.latencyMs);
-            const reduced = state.settings.visualEffects === "reduced" ||
-              (state.settings.autoPerformanceMode && state.performance.effectsReduced);
-            state.performance.mode = reduced ? "REDUCED_EFFECTS" : "MEASURING";
-            state.camera.width = video.videoWidth;
-            state.camera.height = video.videoHeight;
-            const associationAt = performance.now();
-            updateHands(sample, now);
-            profile.record("association", performance.now() - associationAt);
-            const gestureAt = performance.now();
-            const gestureEvents = updateGestureData(now);
-            profile.record("gestures", performance.now() - gestureAt);
-
-            if (!state.readiness.trackerReady) {
-              state.readiness.trackerReady = true;
-              state.runtime.busy = false;
-              startupController = null;
-              setStage("READY", state.runtime.gestureError
-                ? "Camera tracking ready. Gesture diagnostics require a retry."
-                : "Two-hand tracking and gesture engine ready. Open a mode to interact.");
-            }
-            const interactionAt = performance.now();
-            runModeFrame(gestureEvents, now, reduced);
-            profile.record("interaction", performance.now() - interactionAt);
-            const overlayAt = performance.now();
-            ui.drawHands(state.hands, tracker.connections, state.settings,
-              state.handInput.primaryHandId, reduced);
-            profile.record("overlay", performance.now() - overlayAt);
-            profile.record("pipeline", performance.now() - pipelineAt);
-          }
-        }
-
-        const staleFor = now - loop.lastFreshAt;
-        if (staleFor >= 1000 && !loop.stalled) {
-          loop.stalled = true;
-          clearHandData();
-          updateTracking(false, now);
-          state.readiness.trackerReady = false;
-          state.performance.fps = 0;
-          state.performance.inferenceLatencyMs = null;
-          state.runtime.startupStage = "WAITING FOR FRAMES";
-          state.runtime.startupDetail = "The camera is not delivering fresh frames.";
-          logEvent("WARNING", "CAMERA FRAME DELIVERY STALLED");
-        }
-        if (staleFor >= 5000) {
-          failPipeline("No fresh camera frames for five seconds. Close other camera apps and retry.");
-          return;
-        }
-
-        const reducedHUD = state.settings.visualEffects === "reduced" ||
-          (state.settings.autoPerformanceMode && state.performance.effectsReduced);
-        if (now - loop.lastHUD >= (reducedHUD ? 200 : 100)) {
-          render(); loop.lastHUD = now;
-        }
-        loop.id = requestAnimationFrame(frame);
-      } catch (error) {
-        failPipeline("Hand tracking failed: " + error.message, true);
+      const now = performance.now();
+      const staleFor = now - loop.lastFreshAt;
+      if (staleFor >= 1000 && !loop.stalled) {
+        loop.stalled = true;
+        clearHandData();
+        updateTracking(false, now);
+        state.readiness.trackerReady = false;
+        state.performance.fps = 0;
+        state.performance.inferenceLatencyMs = null;
+        state.runtime.startupStage = "WAITING FOR FRAMES";
+        state.runtime.startupDetail = "The camera is not delivering fresh frames.";
+        logEvent("WARNING", "CAMERA FRAME DELIVERY STALLED");
       }
+      if (staleFor >= 5000) {
+        failPipeline("No fresh camera frames for five seconds. Close other camera apps and retry.");
+        return;
+      }
+      const reducedHUD = state.settings.visualEffects === "reduced" ||
+        (state.settings.autoPerformanceMode && state.performance.effectsReduced);
+      if (now - loop.lastHUD >= (reducedHUD ? 200 : 100)) {
+        render(); loop.lastHUD = now;
+      }
+      loop.id = requestAnimationFrame(housekeeping);
     }
 
-    loop.id = requestAnimationFrame(frame);
+    scheduleVideoFrame();
+    loop.id = requestAnimationFrame(housekeeping);
   }
 
   async function startPipeline() {
@@ -996,6 +1148,10 @@ function initialize() {
     cancelModeInput(); resetGestures(); callMode("suspend");
   });
 
+  events.addEventListener("welcomeClosed", () => {
+    cancelModeInput(); resetGestures();
+  });
+
   function setHandUI(enabled) {
     if (state.currentMode !== "air-draw" || state.runtime.handUI === enabled) return;
     cancelModeInput(); resetGestures();
@@ -1062,6 +1218,20 @@ function initialize() {
         logEvent("ACTION", "SYSTEM SETTINGS RESET");
         render();
         break;
+      case "onboarding-start":
+        ui.closeWelcome();
+        changeMode("learn", "WELCOME");
+        callMode("onAction", "learn-demo-start", control);
+        if (!state.camera.active && !state.runtime.busy) toggleCamera();
+        break;
+      case "onboarding-skip": {
+        const saved = markOnboardingCompleted("skipped");
+        ui.closeWelcome();
+        logEvent("ACTION", "ONBOARDING SKIPPED");
+        ui.notify(saved ? "Welcome skipped. Demo / Learn stays available in the sidebar."
+          : "Welcome skipped for this session. Browser storage is unavailable.", saved ? "info" : "warning");
+        break;
+      }
       case "quick-start-dismiss": setSystemPreference("firstRunDismissed", true, { keepPreset: true }); break;
       case "dual-ui-toggle": setPrecisionPreference("dualHandUI", !state.settings.dualHandUI); break;
       case "adaptive-toggle": setPrecisionPreference("adaptiveSmoothing", !state.settings.adaptiveSmoothing); break;
@@ -1180,6 +1350,11 @@ function initialize() {
   }
   render();
   ui.finishInitialization();
+  if (!onboardingCompleted()) {
+    window.setTimeout(() => {
+      if (!onboardingCompleted()) ui.openWelcome();
+    }, 1250);
+  }
 }
 
 // Read-only snapshots for diagnostics and future integration; no window globals.

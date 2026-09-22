@@ -9,6 +9,7 @@
 <title>VOIDS VISION — Control Without Touch.</title>
 <link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23060b13'/%3E%3Cpath d='M14 17 32 48 50 17M24 17 32 31 40 17' fill='none' stroke='%2345dbff' stroke-width='4'/%3E%3C/svg%3E" rel="icon">
 <link href="./css/style.css" rel="stylesheet">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 <script src="./js/app.js" type="module"></script>
 </head>
 <body>
@@ -38,6 +39,10 @@
 <symbol id="icon-spatial" viewbox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10 9-5M12 12 3 7m9 5v10"></path></symbol>
 <symbol id="icon-challenge" viewbox="0 0 24 24">
 <path d="M7 3h10v7a5 5 0 0 1-10 0V3ZM7 5H3v3a4 4 0 0 0 4 4M17 5h4v3a4 4 0 0 1-4 4M12 15v6M8 21h8"></path>
+</symbol>
+<symbol id="icon-learn" viewbox="0 0 24 24">
+<path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22V5.5ZM20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22V5.5Z"></path>
+<path d="m9 8 4 2.5L9 13V8Z"></path>
 </symbol>
 <symbol id="icon-camera" viewbox="0 0 24 24">
 <rect height="14" rx="2" width="18" x="3" y="6"></rect>
@@ -70,6 +75,9 @@
 <button aria-controls="mode-home" aria-current="page" data-gesture-target="" data-mode="home" type="button">
 <svg aria-hidden="true" class="icon"><use href="#icon-home"></use></svg>Home
         </button>
+<button aria-controls="mode-learn" data-gesture-target="" data-mode="learn" type="button">
+<svg aria-hidden="true" class="icon"><use href="#icon-learn"></use></svg>Demo / Learn
+        </button>
 <button aria-controls="mode-pointer" data-gesture-target="" data-mode="pointer" type="button">
 <svg aria-hidden="true" class="icon"><use href="#icon-pointer"></use></svg>Pointer
         </button>
@@ -90,7 +98,7 @@
         </button>
 </nav>
 <div class="sidebar-footer">
-<span class="status-chip">V1 / GESTURE DIAGNOSTICS</span>
+<span class="status-chip">V1.5.4 / ADAPTIVE MOTION SMOOTHING</span>
 <p>Real-Time Hand Tracking<br>&amp; Gesture Interaction</p>
 <p class="muted">Camera processing stays on-device.</p>
 </div>
@@ -218,8 +226,8 @@
 <section aria-labelledby="home-title" class="mode-panel panel" data-mode-panel="home" id="mode-home" tabindex="0">
 <div class="panel-heading"><h2 id="home-title">Explore your workspace</h2><span class="muted">HOME</span></div>
 <div class="quick-start" id="quick-start">
-<div><strong>QUICK START</strong><span>Use even front/side lighting · INDEX aims · pinch + release selects · pinch + drag scrolls.</span></div>
-<button class="button compact" data-action="quick-start-dismiss" data-gesture-target="" type="button">Got it</button>
+<div><strong>NEW · DEMO / LEARN</strong><span>Run the live Quick Demo, practice gestures, or open the visual control guide.</span></div>
+<div class="control-row"><button class="button compact" data-gesture-target="" data-mode="learn" type="button">Open Demo / Learn</button><button class="button compact" data-action="quick-start-dismiss" data-gesture-target="" type="button">Dismiss</button></div>
 </div>
 <div class="launch-grid">
 <button class="launch-card" data-gesture-target="" data-mode="pointer" type="button">
@@ -272,7 +280,52 @@
 <ol aria-label="Recent interface events, newest first" class="event-log" data-gesture-scroll="" id="event-log" tabindex="0">
 <li class="log-empty">No events. Waiting for initialization.</li>
 </ol>
-</section><footer class="workspace-footer"><span>VOIDS VISION / Control Without Touch.</span><span>Camera processing stays on-device.</span></footer></div><div class="mode-workspaces"><section aria-labelledby="pointer-title" class="mode-panel panel" data-gesture-scroll="" data-mode-panel="pointer" hidden="" id="mode-pointer" tabindex="0">
+</section><footer class="workspace-footer"><span>VOIDS VISION / Control Without Touch.</span><span>Camera processing stays on-device.</span></footer></div><div class="mode-workspaces"><section aria-labelledby="learn-title" class="mode-panel panel learn-center" data-gesture-scroll="" data-mode-panel="learn" hidden="" id="mode-learn" tabindex="0">
+<div class="panel-heading"><div><h2 id="learn-title">Demo / Learn Center</h2><p class="panel-note">A short live walkthrough, friendly practice, and one-page gesture reference.</p></div><span class="mode-status" id="learn-status">LEARN CENTER</span></div>
+<div class="learn-grid">
+<article class="learn-card learn-demo-card">
+<div class="learn-card-heading"><div><p class="eyebrow">LIVE QUICK DEMO</p><h3 id="learn-demo-title">Quick Demo · about 45–60 seconds</h3></div><span class="mode-status" id="learn-demo-status">READY</span></div>
+<div class="learn-demo-stage">
+<section class="learn-stage-readiness" aria-label="Live tracking readiness">
+<div class="learn-stage-title"><span class="eyebrow">REAL READINESS</span><strong>Tracking check</strong></div>
+<dl class="learn-readiness-grid"><div><dt>Camera</dt><dd id="learn-ready-camera">OFF</dd></div><div><dt>Tracking</dt><dd id="learn-ready-tracking">NOT INITIALIZED</dd></div><div><dt>Quality</dt><dd id="learn-ready-quality">--</dd></div><div><dt>Performance</dt><dd id="learn-ready-performance">NOT MEASURED</dd></div><div><dt>Profile</dt><dd id="learn-ready-profile">BALANCED</dd></div></dl>
+<p class="learn-readiness-hint" id="learn-ready-hint">Start the camera to measure real tracking readiness.</p>
+<div class="control-row learn-readiness-actions"><button class="button" data-action="system-check" data-gesture-target="" type="button">System Check</button><button class="button" data-gesture-target="" data-mode="gesture-lab" type="button">Gesture Lab</button></div>
+</section>
+<div class="learn-stage-camera">
+<div class="learn-camera-preview" id="learn-camera-preview-wrap"><canvas aria-label="Live camera preview for the Quick Demo" height="360" id="learn-camera-preview" width="480"></canvas><div class="learn-camera-empty" id="learn-camera-empty">START CAMERA TO SEE LIVE PREVIEW</div><span class="mode-status" id="learn-camera-badge">CAMERA OFF</span></div>
+<div class="learn-camera-caption"><span>LIVE CAMERA</span><span>Keep your full hand inside frame</span></div>
+</div>
+<section class="learn-stage-instructions" aria-label="Current demo step">
+<div aria-label="Quick Demo progress" aria-valuemax="100" aria-valuemin="0" aria-valuenow="0" class="stability-track learn-demo-meter" id="learn-demo-meter" role="progressbar"><div id="learn-demo-progress"></div></div>
+<div class="learn-step-row"><strong id="learn-demo-step">--</strong><span id="learn-demo-signal">Start the Quick Demo when you are ready.</span></div>
+<p id="learn-demo-instruction">Start a short live walkthrough. Each step advances only after VOIDS VISION sees the real gesture signal.</p>
+<p class="panel-note" id="learn-demo-hint">The demo uses real camera / gesture state; it does not fake completion signals.</p>
+<div class="control-row learn-demo-actions"><button class="button primary" data-action="learn-demo-start" data-gesture-target="" id="learn-demo-start" type="button">Start Quick Demo</button><button class="button" data-action="learn-demo-skip" data-gesture-target="" disabled="" id="learn-demo-skip" type="button">Skip step</button><button class="button" data-action="learn-demo-stop" data-gesture-target="" disabled="" id="learn-demo-stop" type="button">Stop demo</button><button class="button" data-action="camera" data-gesture-target="" data-requires-native="" disabled="" type="button"><span data-camera-label="">Start camera</span></button></div>
+</section>
+</div>
+</article>
+<article class="learn-card learn-practice-card">
+<div class="learn-card-heading"><div><p class="eyebrow">GESTURE PRACTICE</p><h3>Practice without a timer</h3></div><span class="mode-status"><b id="learn-practice-count">0</b> MATCHES</span></div>
+<p class="panel-note">Choose one gesture, perform it in camera view, then release / change pose before repeating. Matches come from the real gesture engine.</p>
+<div aria-label="Choose a gesture to practice" class="learn-gesture-buttons" role="group">
+<button aria-pressed="true" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="INDEX_ONLY" data-value="INDEX_ONLY" type="button">Index only</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="PINCH" data-value="PINCH" type="button">Pinch</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="FIST" data-value="FIST" type="button">Fist</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="OPEN_PALM" data-value="OPEN_PALM" type="button">Open palm</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="THUMBS_UP" data-value="THUMBS_UP" type="button">Thumbs up</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="SWIPE_LEFT" data-value="SWIPE_LEFT" type="button">Swipe left</button>
+<button aria-pressed="false" class="button" data-action="learn-practice-select" data-gesture-target="" data-learn-gesture="SWIPE_RIGHT" data-value="SWIPE_RIGHT" type="button">Swipe right</button>
+</div>
+<div class="learn-practice-live"><span>EXPECTED</span><strong id="learn-practice-target">INDEX ONLY</strong><span>LIVE RESULT</span><strong id="learn-practice-status">Choose a gesture and perform it in camera view.</strong></div>
+</article>
+<article class="learn-card learn-guide-card">
+<div class="learn-card-heading"><div><p class="eyebrow">GESTURE GUIDE</p><h3>One-page control reference</h3></div><span class="mode-status">KEEP IT SIMPLE</span></div>
+<figure class="learn-guide-figure"><img alt="VOIDS VISION quick gesture guide showing camera setup, index aim, pinch select, pinch drag, fist pause, open-palm swipe, thumbs-up confirm, and two-hand Spatial control." loading="lazy" src="./assets/voids-vision-gesture-guide.webp"><figcaption>Index = Aim · Pinch = Select · Pinch + Drag = Scroll / Drag · Fist = Pause · Open Palm Swipe = Previous / Next · Thumbs Up = Start / Confirm.</figcaption></figure>
+<div class="learn-two-hand-note"><strong>TWO-HAND SPATIAL</strong><span>First grab = Anchor · keep the second hand comfortably separated from the Anchor and pinch anywhere in camera view to join · AUTO transform assist = deliberate radial motion locks Scale, deliberate arc motion locks Rotate · releasing the second hand leaves the Anchor holding.</span><button class="button" data-gesture-target="" data-mode="spatial" type="button">Open Spatial / Holo</button></div>
+</article>
+</div>
+</section><section aria-labelledby="pointer-title" class="mode-panel panel" data-gesture-scroll="" data-mode-panel="pointer" hidden="" id="mode-pointer" tabindex="0">
 <div class="panel-heading"><h2 id="pointer-title">Interactive control panel</h2><span class="mode-status" id="pointer-mode-status">Hold INDEX ONLY to move</span></div>
 <p class="panel-note">INDEX ONLY aims. Acquire a target, pinch, then release to select. Drag vertically while pinching to scroll the panel instead. Release frees the pointer. Either hand can operate controls; FIST pauses.</p>
 <div class="pointer-cards">
@@ -421,6 +474,16 @@
 <div><dt>Palm scale (width units)</dt><dd data-hand-field="scale">--</dd></div>
 <div><dt>Pinch distance / scale</dt><dd data-hand-field="pinchDistance">--</dd></div>
 <div><dt>Pinch raw / stable / confirmed</dt><dd data-hand-field="pinch">--</dd></div>
+<div><dt>Interaction pinch state</dt><dd data-hand-field="interactionPinch">--</dd></div>
+<div><dt>Adaptive pinch enter / exit</dt><dd data-hand-field="pinchThresholds">--</dd></div>
+<div><dt>Pinch calibration</dt><dd data-hand-field="pinchCalibration">--</dd></div>
+<div><dt>Pointer raw / filtered / rendered</dt><dd data-hand-field="pointerPositions">--</dd></div>
+<div><dt>Aim error · filtered→rendered</dt><dd data-hand-field="pointerError">--</dd></div>
+<div><dt>Motion direction / speed</dt><dd data-hand-field="motionDetail">--</dd></div>
+<div><dt>Pose / motion confidence</dt><dd data-hand-field="motionConfidence">--</dd></div>
+<div><dt>Tracking quality</dt><dd data-hand-field="trackingQuality">--</dd></div>
+<div><dt>Pointer mapping</dt><dd data-hand-field="pointerMapping">--</dd></div>
+<div><dt>Swipe intent detail</dt><dd data-hand-field="swipeIntent">--</dd></div>
 <div><dt>Movement / consistency</dt><dd data-hand-field="movement">--</dd></div>
 <div><dt>History samples</dt><dd data-hand-field="history">--</dd></div>
 <div><dt>Static cooldown</dt><dd data-hand-field="cooldown">--</dd></div>
@@ -439,6 +502,16 @@
 <div><dt>Palm scale (width units)</dt><dd data-hand-field="scale">--</dd></div>
 <div><dt>Pinch distance / scale</dt><dd data-hand-field="pinchDistance">--</dd></div>
 <div><dt>Pinch raw / stable / confirmed</dt><dd data-hand-field="pinch">--</dd></div>
+<div><dt>Interaction pinch state</dt><dd data-hand-field="interactionPinch">--</dd></div>
+<div><dt>Adaptive pinch enter / exit</dt><dd data-hand-field="pinchThresholds">--</dd></div>
+<div><dt>Pinch calibration</dt><dd data-hand-field="pinchCalibration">--</dd></div>
+<div><dt>Pointer raw / filtered / rendered</dt><dd data-hand-field="pointerPositions">--</dd></div>
+<div><dt>Aim error · filtered→rendered</dt><dd data-hand-field="pointerError">--</dd></div>
+<div><dt>Motion direction / speed</dt><dd data-hand-field="motionDetail">--</dd></div>
+<div><dt>Pose / motion confidence</dt><dd data-hand-field="motionConfidence">--</dd></div>
+<div><dt>Tracking quality</dt><dd data-hand-field="trackingQuality">--</dd></div>
+<div><dt>Pointer mapping</dt><dd data-hand-field="pointerMapping">--</dd></div>
+<div><dt>Swipe intent detail</dt><dd data-hand-field="swipeIntent">--</dd></div>
 <div><dt>Movement / consistency</dt><dd data-hand-field="movement">--</dd></div>
 <div><dt>History samples</dt><dd data-hand-field="history">--</dd></div>
 <div><dt>Static cooldown</dt><dd data-hand-field="cooldown">--</dd></div>
@@ -534,6 +607,7 @@
 <div><dt>3D selected / kind</dt><dd id="spatial-diag-3d-selected">--</dd></div>
 <div><dt>3D interaction / Anchor / Manipulator</dt><dd id="spatial-diag-3d-control">--</dd></div>
 <div><dt>3D scale / yaw / pitch / roll</dt><dd id="spatial-diag-3d-transform">--</dd></div>
+<div><dt>3D AUTO evidence · Scale / Rotate</dt><dd id="spatial-diag-3d-evidence">--</dd></div>
 <div><dt>3D render FPS / quality / objects</dt><dd id="spatial-diag-3d-performance">--</dd></div>
 </dl>
 <p class="panel-note">Entering Gesture Lab releases Spatial control. Pair observations stay live; baseline and transform deltas describe the last grab. View pan/zoom do not add document Undo entries.</p>
@@ -542,7 +616,7 @@
 <details class="details-panel"><summary data-gesture-target="">Recent confirmed gestures</summary><ol aria-label="Recent confirmed gestures" class="event-log" data-gesture-scroll="" id="gesture-history" tabindex="0"><li class="log-empty">No confirmed gestures.</li></ol></details>
 </section><button aria-label="Pinch and drag to scroll Gesture Lab" class="gesture-scroll-rail" data-gesture-target="" data-scroll-rail="mode-gesture-lab" title="Pinch + drag to scroll" type="button"><span aria-hidden="true"></span></button></div><section aria-labelledby="spatial-title" class="mode-panel panel" data-gesture-scroll="" data-mode-panel="spatial" hidden="" id="mode-spatial" tabindex="0">
 <div class="panel-heading"><h2 id="spatial-title">Spatial / Holo workspace</h2><span class="mode-status" id="spatial-workspace-status">READY</span></div>
-<p class="panel-note">Either hand grabs first = ANCHOR. The other joins = MANIPULATOR. Release the other hand to keep holding; release the Anchor to drop. Pinch-drag panels to scroll. Both pinches on empty board control workspace zoom/pan.</p>
+<p class="panel-note">Either hand grabs first = ANCHOR. For 3D, the other hand may pinch anywhere away from the Anchor to join = MANIPULATOR. AUTO waits for deliberate motion, then locks that secondary pinch to SCALE or ROTATE; FREE preserves simultaneous transforms. Release the Manipulator to choose again while the Anchor keeps holding. Pinch-drag panels to scroll. Both pinches on empty board control workspace zoom/pan.</p>
 <div aria-label="Workspace tools" class="control-row spatial-toolbar" id="spatial-toolbar">
 <button aria-pressed="true" class="button" data-action="spatial-tool" data-gesture-target="" data-value="select" type="button">Select</button>
 <button aria-pressed="false" class="button" data-action="spatial-tool" data-gesture-target="" data-value="pan" type="button">Pan</button>
@@ -553,19 +627,27 @@
 <button aria-pressed="false" class="button" data-action="spatial-background" data-gesture-target="" id="spatial-background" type="button">Camera background OFF</button>
 <button class="button" data-action="spatial-save-project" data-gesture-target="" type="button">Save project</button>
 <button class="button" data-action="spatial-load-project" data-gesture-target="" type="button">Load project</button>
+<button class="button spatial-import-image" data-action="spatial-import-image" data-gesture-target="" type="button">Import image holo</button>
+<button class="button spatial-import-model" data-action="spatial-import-model" data-gesture-target="" type="button">Import 3D model</button>
 <button class="button" data-action="spatial-export-png" data-gesture-target="" type="button">Export PNG</button>
 <button class="button" data-action="spatial-export-svg" data-gesture-target="" type="button">Export SVG</button>
 <button class="button" data-action="spatial-focus" data-gesture-target="" type="button">Focus board</button>
 <input accept="application/json,.json" hidden="" id="spatial-project-file" type="file"/>
+<input accept="image/png,image/jpeg,image/webp" hidden="" id="spatial-image-file" type="file"/>
+<input accept=".glb,.gltf,.obj,.stl,.fbx,.bin,.png,.jpg,.jpeg,.webp,model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp" hidden="" id="spatial-model-file" multiple="" type="file"/>
+<div class="spatial-model-dropzone" data-gesture-target="" data-requires-native="" id="spatial-model-dropzone" role="button" tabindex="0">
+  <strong>3D MODEL DROP ZONE</strong>
+  <span>Drop GLB / GLTF / OBJ / STL / FBX here · GLTF companions can be dropped together</span>
+</div>
 </div>
 <div class="notice warning spatial-load-confirmation" hidden="" id="spatial-load-confirmation">
 <p id="spatial-load-question">Load selected project? This replaces the current workspace.</p>
 <div class="control-row"><button class="button safety" data-action="spatial-confirm-load" data-gesture-target="" type="button">Replace workspace</button><button class="button" data-action="spatial-cancel-load" data-gesture-target="" type="button">Cancel</button></div>
 </div>
-<p class="panel-note spatial-export-note">Save/Load stores 2D + 3D workspace data. PNG exports the visible board; camera is included only when Camera background is ON. SVG exports the editable 2D diagram layer.</p>
+<p class="panel-note spatial-export-note">Save/Load stores 2D + 3D workspace data, including image holograms and portable imported 3D assets. Import 3D accepts GLB, GLTF, OBJ, STL, or FBX. GLB is recommended. For GLTF with external .BIN/textures, select all companion files together. The picker explicitly exposes supported model extensions on Windows. You can also drag and drop a model into the 3D Model Drop Zone or directly onto the Holo board. Up to 12 distinct imported model assets are allowed per live workspace; duplicates can share an asset. Each model selection is capped at 14 MB, portable workspace JSON is capped at 64 MB, and GLB is recommended for the most reliable import. GLTF companion BIN/textures may be selected or dropped together. JSON workspace files are not 3D models. PNG exports the visible board; camera is included only when Camera background is ON.</p>
 <div class="spatial-layout">
 <details class="details-panel spatial-library" open="">
-<summary data-gesture-target="">Shape / hologram library · 28 tools</summary>
+<summary data-gesture-target="">Shape / hologram library · 32 tools + image / real 3D import</summary>
 <div class="scroll-panel-wrap"><div aria-label="Shape and hologram library" class="spatial-palette" data-gesture-scroll="" id="spatial-library" tabindex="0"></div><button aria-label="Pinch and drag to scroll Shape Library" class="gesture-scroll-rail" data-gesture-target="" data-scroll-rail="spatial-library" title="Pinch + drag to scroll" type="button"><span aria-hidden="true"></span></button></div>
 </details>
 <div class="spatial-main">
@@ -603,26 +685,73 @@
 <div class="panel-heading"><h3 id="spatial-properties-title">Object properties</h3><span id="spatial-selected-name">No object selected</span></div>
 <div aria-label="Object properties" class="spatial-property-controls" data-gesture-scroll="" id="spatial-property-controls" tabindex="0">
 <section class="spatial-3d-properties" id="spatial-3d-properties">
-<p class="section-label">3D HOLOGRAM</p>
+<p class="section-label">3D WORKSPACE PRO</p>
+<div class="spatial-scene-panel">
+<div class="spatial-scene-heading"><strong>Scene objects</strong><span id="spatial-3d-scene-stats">0/0 visible · 0 locked</span></div>
+<div aria-label="3D scene objects" class="spatial-scene-list" id="spatial-3d-scene-list"></div>
+</div>
+<div class="spatial-3d-name-editor">
+<label for="spatial-3d-name-input">Object name</label>
+<div class="control-row"><input autocomplete="off" disabled id="spatial-3d-name-input" maxlength="60" placeholder="Select a 3D object" type="text"><button class="button" data-action="spatial-3d-rename" data-gesture-target="" data-spatial-3d-selected="" type="button">Rename</button></div>
+</div>
 <dl class="spatial-3d-readout">
 <div><dt>Position X/Y/Z</dt><dd id="spatial-3d-position">--</dd></div>
 <div><dt>Rotation X/Y/Z</dt><dd id="spatial-3d-rotation">--</dd></div>
 <div><dt>Scale</dt><dd id="spatial-3d-scale">--</dd></div>
+<div><dt>Gesture transform</dt><dd><span id="spatial-3d-gesture-mode">AUTO</span> · <span id="spatial-3d-gesture-status">IDLE</span></dd></div>
+<div><dt>Visibility / Lock</dt><dd><span id="spatial-3d-visible-value">--</span> · <span id="spatial-3d-lock-value">--</span></dd></div>
+<div><dt>Geometry</dt><dd id="spatial-3d-geometry">--</dd></div>
+<div><dt>Appearance</dt><dd id="spatial-3d-appearance">--</dd></div>
+<div><dt>Imported source</dt><dd id="spatial-3d-image-name">--</dd></div>
+<div><dt>Model status</dt><dd id="spatial-3d-model-status">--</dd></div>
 </dl>
+<div class="spatial-3d-transform-editor">
+<span class="spatial-mini-label">GESTURE TRANSFORM ASSIST</span>
+<div aria-label="3D gesture transform mode" class="control-row spatial-transform-mode" role="group">
+<button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="auto" type="button">Auto</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="scale" type="button">Scale</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="rotate" type="button">Rotate</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="free" type="button">Free</button>
+</div>
+<p class="panel-note">AUTO locks each secondary-hand pinch to Scale or Rotate after deliberate motion. Release and re-pinch to choose again. FREE preserves simultaneous scale + rotation.</p>
+<span class="spatial-mini-label">PRECISE TRANSFORM</span>
+<div class="spatial-axis-row"><b>MOVE X</b><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
+<div class="spatial-axis-row"><b>MOVE Y</b><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
+<div class="spatial-axis-row"><b>MOVE Z</b><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
+<div class="spatial-axis-row"><b>ROTATE X</b><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-15" data-transform-kind="rotation" type="button">−15°</button><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="15" data-transform-kind="rotation" type="button">+15°</button></div>
+<div class="spatial-axis-row"><b>ROTATE Y</b><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-15" data-transform-kind="rotation" type="button">−15°</button><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="15" data-transform-kind="rotation" type="button">+15°</button></div>
+<div class="spatial-axis-row"><b>ROTATE Z</b><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-15" data-transform-kind="rotation" type="button">−15°</button><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="15" data-transform-kind="rotation" type="button">+15°</button></div>
+<div class="spatial-axis-row"><b>SCALE</b><button class="button" data-action="spatial-3d-adjust" data-axis="all" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="scale" type="button">−0.1</button><button class="button" data-action="spatial-3d-adjust" data-axis="all" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="scale" type="button">+0.1</button></div>
+</div>
+<div class="control-row spatial-object-state-controls">
+<button class="button" data-action="spatial-3d-visibility" data-gesture-target="" data-spatial-3d-selected="" type="button">Hide object</button>
+<button class="button" data-action="spatial-3d-lock" data-gesture-target="" data-spatial-3d-selected="" type="button">Lock object</button>
+</div>
 <div class="control-row">
-<button class="button" data-action="spatial-3d-depth-out" data-gesture-target="" data-spatial-3d-selected="" type="button">Depth −</button>
-<button class="button" data-action="spatial-3d-depth-in" data-gesture-target="" data-spatial-3d-selected="" type="button">Depth +</button>
-<button class="button" data-action="spatial-3d-reset" data-gesture-target="" data-spatial-3d-selected="" type="button">Reset 3D</button>
+<button class="button" data-action="spatial-3d-focus" data-gesture-target="" data-spatial-3d-selected="" type="button">Focus selected</button>
+<button class="button" data-action="spatial-3d-center-camera" data-gesture-target="" type="button">Scene center</button>
+</div>
+<div class="spatial-property-row spatial-holo-color-row"><span>Holo color</span><div class="control-row" id="spatial-3d-colors"></div></div>
+<div class="control-row spatial-holo-appearance-controls">
+<button class="button" data-action="spatial-3d-glow-minus" data-gesture-target="" data-spatial-3d-selected="" type="button">Glow −</button><span id="spatial-3d-glow-value">--</span>
+<button class="button" data-action="spatial-3d-glow-plus" data-gesture-target="" data-spatial-3d-selected="" type="button">Glow +</button>
+<button class="button" data-action="spatial-3d-opacity-minus" data-gesture-target="" data-spatial-3d-selected="" type="button">Opacity −</button><span id="spatial-3d-opacity-value">--</span>
+<button class="button" data-action="spatial-3d-opacity-plus" data-gesture-target="" data-spatial-3d-selected="" type="button">Opacity +</button>
+</div>
+<div class="control-row">
+<button class="button" data-action="spatial-3d-depth-out" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" type="button">Depth −</button>
+<button class="button" data-action="spatial-3d-depth-in" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" type="button">Depth +</button>
+<button class="button" data-action="spatial-3d-reset" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" type="button">Reset 3D</button>
 </div>
 <div class="control-row">
 <button class="button" data-action="spatial-3d-duplicate" data-gesture-target="" data-spatial-3d-selected="" type="button">Duplicate 3D</button>
-<button class="button safety" data-action="spatial-3d-delete" data-gesture-target="" data-spatial-3d-selected="" type="button">Delete 3D…</button>
+<button class="button safety" data-action="spatial-3d-delete" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" type="button">Delete 3D…</button>
 </div>
-<div class="notice warning" hidden="" id="spatial-3d-delete-confirmation">
+<div class="notice warning" hidden id="spatial-3d-delete-confirmation">
 <p id="spatial-3d-delete-question">Delete selected 3D object?</p>
 <div class="control-row"><button class="button safety" data-action="spatial-3d-confirm-delete" data-gesture-target="" type="button">Confirm delete</button><button class="button" data-action="spatial-3d-cancel-delete" data-gesture-target="" type="button">Keep object</button></div>
 </div>
-<p class="panel-note">3D: first hand grabs = Anchor; second hand joins = scale + yaw + pitch + roll. Depth uses the safe +/- controls so webcam depth noise cannot throw an object toward the camera.</p>
+<p class="panel-note">V1.5.4 Adaptive Motion Smoothing: V1.5.3 runtime recovery is preserved, with palm-relative pointer stabilization, pinch-safe aim locking, low-FPS visual resampling, and cheaper Spatial 3D redraws for smoother control without sacrificing deliberate motion. AUTO/Scale/Rotate/Free, free-space manipulation, and all V1.4.1 hardening remain intact.</p>
 </section>
 <div class="spatial-property-row"><span>Stroke</span><div class="control-row" id="spatial-stroke-colors"></div></div>
 <div class="spatial-property-row"><span>Fill</span><div class="control-row" id="spatial-fill-colors"></div></div>
@@ -737,7 +866,14 @@
 <button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="transformSensitivity" data-value="medium" type="button">Medium</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="transformSensitivity" data-value="high" type="button">High</button>
 </div>
-<p class="panel-note">Assist expands handle targets without snapping a cursor. Either hand may select UI. Spatial dual pointer OFF disables the other hand joining objects. Dual hand UI OFF limits new input to one available hand.</p>
+<p class="section-label">3D TRANSFORM ASSIST</p>
+<div aria-label="3D transform assist mode" class="control-row" role="group">
+<button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="auto" type="button">Auto</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="scale" type="button">Scale</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="rotate" type="button">Rotate</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="free" type="button">Free</button>
+</div>
+<p class="panel-note">Assist expands handle targets without snapping a cursor. AUTO reduces two-hand 3D cross-talk by locking the secondary pinch to Scale or Rotate. FREE permits both at once. Spatial dual pointer OFF disables the other hand joining objects.</p>
 </fieldset>
 <fieldset class="precision-settings">
 <legend>System profile</legend>
@@ -802,6 +938,15 @@
 <span class="spatial-pointer-label"><b id="spatial-secondary-cursor-state">AIMING</b></span>
 </div>
 </div>
+<dialog aria-labelledby="welcome-title" aria-describedby="welcome-description" class="welcome-dialog" id="welcome-dialog">
+<div class="welcome-mark"><svg aria-hidden="true" class="icon"><use href="#icon-logo"></use></svg></div>
+<p class="eyebrow">WELCOME TO VOIDS VISION</p>
+<h2 id="welcome-title">Control Without Touch.</h2>
+<p id="welcome-description">New here? Run a short live demo that teaches the real gestures as the camera detects them. Or skip straight to the workspace.</p>
+<div class="welcome-points"><span>≈ 45–60 sec</span><span>Live gesture detection</span><span>On-device camera processing</span></div>
+<div class="welcome-actions"><button autofocus="" class="button primary" data-action="onboarding-start" type="button">Start Quick Demo</button><button class="button" data-action="onboarding-skip" type="button">Skip · I know the controls</button></div>
+<p class="panel-note">This welcome appears only on the first visit after you complete or skip it. Demo / Learn stays available in the sidebar.</p>
+</dialog>
 <dialog aria-labelledby="system-check-title" class="system-check-dialog" id="system-check-dialog">
 <div class="panel-heading"><h2 id="system-check-title">System Check</h2><button autofocus="" class="button" data-action="close-system-check" data-gesture-target="" type="button">Close</button></div>
 <div class="system-health"><span>OVERALL</span><strong id="check-overall">CHECKING</strong><p id="check-recommendation">Start the camera to measure tracking performance.</p></div>

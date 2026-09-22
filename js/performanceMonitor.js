@@ -5,7 +5,8 @@ export function createPerformanceMonitor(performanceState) {
   const data = performanceState.profile = {
     cameraFps: null, cameraSource: "UNAVAILABLE", cameraRequestedFps: null,
     pipelineMs: null, stages: {}, windowMs: 0, activeMode: "home", hands: 0,
-    delegate: null, reduced: false, inferenceInFlight: 0, maxInferenceInFlight: 0
+    delegate: null, reduced: false, inferenceInFlight: 0, maxInferenceInFlight: 0,
+    inferenceScheduler: "UNAVAILABLE", sourceFrameIntervalMs: null, inferenceIntervalMs: null
   };
   let video = null, callbackId = null, token = 0, startAt = null;
   let presented = null, presentedAt = null, lastCamera = null;
@@ -20,7 +21,8 @@ export function createPerformanceMonitor(performanceState) {
     callbackId = null; video = null; startAt = null;
     presented = presentedAt = lastCamera = null;
     Object.assign(data, { cameraFps: null, cameraSource: "UNAVAILABLE", cameraRequestedFps: null,
-      pipelineMs: null, stages: {}, windowMs: 0, inferenceInFlight: 0, maxInferenceInFlight: 0 });
+      pipelineMs: null, stages: {}, windowMs: 0, inferenceInFlight: 0, maxInferenceInFlight: 0,
+      inferenceScheduler: "UNAVAILABLE", sourceFrameIntervalMs: null, inferenceIntervalMs: null });
     for (const c of Object.values(counters)) c.count = c.total = c.max = 0;
   }
   function start(element, now) {

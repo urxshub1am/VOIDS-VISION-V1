@@ -219,11 +219,24 @@ export function createUI(events) {
       : state.readiness.trackerReady ? "RUNNING" : "READY · IDLE";
     text(elements.engineStatus, engineStatus);
     text(elements.labStatus, engineStatus);
+    const pointerQualities = Object.values(state.runtime.handPointers || {}).filter(p => p.visible).map(p => p.trackingQuality);
+    const cameraFps = state.performance.profile?.cameraFps;
+    const inferenceFps = state.performance.fps;
+    const latency = state.performance.inferenceLatencyMs;
+    let qualityScore = 1;
+    if (Number.isFinite(cameraFps)) qualityScore *= Math.min(1, cameraFps / 22);
+    if (Number.isFinite(inferenceFps)) qualityScore *= Math.min(1, inferenceFps / 18);
+    if (Number.isFinite(latency)) qualityScore *= Math.min(1, 85 / Math.max(45, latency));
+    if (pointerQualities.includes("POOR")) qualityScore *= 0.62;
+    else if (pointerQualities.includes("FAIR")) qualityScore *= 0.82;
+    const trackingQuality = !state.camera.active ? "--" : qualityScore >= 0.72 ? "GOOD" : qualityScore >= 0.44 ? "FAIR" : "POOR";
+    state.runtime.trackingQuality = trackingQuality;
     const performanceLabel = state.runtime.backgrounded ? "SUSPENDED"
       : state.performance.fps === null ? "NOT MEASURED"
       : state.performance.fps < 20 ? "LOW FPS" : "MEASURING";
     text(elements.performanceStatus, performanceLabel +
-      (state.performance.fps !== null && state.performance.mode === "REDUCED_EFFECTS" ? " · REDUCED EFFECTS" : ""));
+      (state.performance.fps !== null && state.performance.mode === "REDUCED_EFFECTS" ? " · REDUCED EFFECTS" : "") +
+      (state.camera.active ? " · TRACKING " + trackingQuality : ""));
 
     for (const [name, node] of Object.entries(fingers)) {
       const value = primary?.tracking.visible ? primary.fingerStates?.[name] : null;
@@ -267,6 +280,9 @@ export function createUI(events) {
         (state.readiness.modelReady ? "CONFIGURED " + state.runtime.delegate : "MODEL NOT LOADED") + " · " +
         (detail?.reduced ? "REDUCED EFFECTS" : "FULL EFFECTS") +
         (detail?.cameraRequestedFps ? " · track setting " + number(detail.cameraRequestedFps) + " FPS" : "") +
+        (detail?.inferenceScheduler ? " · scheduler " + detail.inferenceScheduler.replaceAll("_", " ") : "") +
+        (Number.isFinite(detail?.sourceFrameIntervalMs) ? " · source Δ " + number(detail.sourceFrameIntervalMs, 1) + " ms" : "") +
+        (Number.isFinite(detail?.inferenceIntervalMs) ? " · inference Δ " + number(detail.inferenceIntervalMs, 1) + " ms" : "") +
         ". Camera delivery is browser-observed; unavailable counters show --.");
       if (f.costs.closest("details")?.open) {
         const rows = Object.entries(detail?.stages || {}).map(([name, v]) =>
@@ -319,11 +335,13 @@ export function createUI(events) {
       setText("spatial-diag-translation", position(control?.translation));
       setText("spatial-diag-resize", position(control?.resizeDelta));
       setText("spatial-diag-preferences", (state.settings.spatialDualPointer !== false ? "ON" : "OFF") + " / " +
-        (state.settings.magneticAimAssist !== false ? "ON" : "OFF") + " / " + (state.settings.transformSensitivity || "medium"));
+        (state.settings.magneticAimAssist !== false ? "ON" : "OFF") + " / " + (state.settings.transformSensitivity || "medium") +
+        " / 3D " + String(state.settings.spatial3DTransformMode || "auto").toUpperCase());
       const holo = state.runtime.modeData.spatial3D;
       setText("spatial-diag-3d-selected", holo?.selectedId ? holo.selectedId + " / " + (workspace?.objects3D?.find(o => o.id === holo.selectedId)?.type || "--") : "--");
-      setText("spatial-diag-3d-control", holo ? holo.phase + " / " + (holo.anchorHandId || "--") + " / " + (holo.manipulatorHandId || "--") : "--");
-      setText("spatial-diag-3d-transform", holo ? number(holo.scaleRatio, 2) + "× / " + number(holo.yaw, 1) + "° / " + number(holo.pitch, 1) + "° / " + number(holo.roll, 1) + "°" : "--");
+      setText("spatial-diag-3d-control", holo ? holo.phase + " / " + (holo.anchorHandId || "--") + " / " + (holo.manipulatorHandId || "--") + " / " + (holo.trackingGuard || "READY") : "--");
+      setText("spatial-diag-3d-transform", holo ? (holo.transformIntent || "NONE") + " · " + number(holo.scaleRatio, 2) + "× / " + number(holo.yaw, 1) + "° / " + number(holo.pitch, 1) + "° / " + number(holo.roll, 1) + "°" : "--");
+      setText("spatial-diag-3d-evidence", holo ? number(holo.scaleEvidence, 3) + " / " + number(holo.rotateEvidence, 3) : "--");
       setText("spatial-diag-3d-performance", holo ? number(holo.renderFps, 1) + " FPS / " + (holo.backend || "--") + " / " + holo.quality + " / " + holo.objectCount : "--");
 
     }
@@ -336,6 +354,10 @@ export function createUI(events) {
       const observed = hand?.geometry && hand.tracking.visible;
       const role = hand?.id === state.handInput.primaryHandId ? "PRIMARY"
         : hand?.id === state.handInput.secondaryHandId ? "SECONDARY" : "UNASSIGNED";
+      const pointer = hand ? state.runtime.handPointers?.[hand.id] : null;
+      const interactionPinch = hand?.interactionPinch;
+      const motion = hand?.motionState;
+      const swipeIntent = pointer?.swipeIntent;
       const values = {
         identity: hand ? hand.id + " · " + (hand.handedness || "Unknown") + " · " + role : "Hand --",
         tracking: hand ? hand.tracking.state + (hand.tracking.visible ? "" : " · MISSING") : "--",
@@ -348,6 +370,18 @@ export function createUI(events) {
         scale: observed ? number(hand.handScale, 3) : "--",
         pinchDistance: observed ? number(hand.pinchDistance, 3) : "--",
         pinch: observed ? pinchLabel(hand.pinch) : "--",
+        interactionPinch: observed && interactionPinch ? interactionPinch.transition + " · " + milliseconds(interactionPinch.stableMs) : "--",
+        pinchThresholds: observed && interactionPinch ? number(interactionPinch.enterThreshold, 3) + " / " + number(interactionPinch.exitThreshold, 3) : "--",
+        pinchCalibration: observed && interactionPinch?.calibration ? interactionPinch.calibration.status + " · " + percent(interactionPinch.calibration.confidence) +
+          " · open " + number(interactionPinch.calibration.openMean, 3) + " · near " + number(interactionPinch.calibration.pinchMin, 3) : "--",
+        pointerPositions: pointer ? position(pointer.raw) + " / " + position(pointer.filtered) + " / " + position(pointer.rendered) : "--",
+        pointerError: pointer ? number(pointer.pointerError, 2) + " px" : "--",
+        motionDetail: motion ? motion.direction + " · " + number(motion.speed, 3) + " /s" : "--",
+        motionConfidence: motion ? percent(motion.poseConfidence) + " / " + percent(motion.motionConfidence) : "--",
+        trackingQuality: pointer?.trackingQuality || motion?.trackingQuality || "--",
+        pointerMapping: pointer?.mapping ? number(pointer.mapping.center.x, 3) + ", " + number(pointer.mapping.center.y, 3) + " · " +
+          number(pointer.mapping.width, 3) + " × " + number(pointer.mapping.height, 3) + " · " + pointer.mapping.samples + " samples" : "--",
+        swipeIntent: swipeIntent ? swipeIntent.state + " · " + (swipeIntent.cancelReason || swipeIntent.direction || "--") + " · motion " + percent(swipeIntent.motionConfidence) : "--",
         movement: observed ? hand.movementDirection + " · " + percent(hand.motion.consistency) : "--",
         history: observed ? String(hand.movementHistory.length) : "--",
         cooldown: observed ? milliseconds(hand.gesture.cooldownRemainingMs) + (hand.gesture.releaseRequired ? " · release required" : "") : "--",
@@ -424,6 +458,9 @@ export function createUI(events) {
           "PINCH distance raw / palm " + number(pointer.interactionPinch?.rawDistance, 4) + " / " + number(pointer.interactionPinch?.normalizedDistance, 3),
           "PINCH geometry / hysteresis / interaction / gesture " + [pointer.interactionPinch?.rawPinch, pointer.interactionPinch?.on, pointer.interactionPinch?.interactionPinch, pointer.interactionPinch?.confirmedGesturePinch].map(yesNo).join(" / "),
           "PINCH stable " + number(pointer.interactionPinch?.stableMs) + " / " + number(pointer.interactionPinch?.requiredMs) + " ms · samples " + (pointer.interactionPinch?.samples || 0),
+          "PINCH velocity " + number(pointer.interactionPinch?.distanceVelocity, 2) + " /s · interval " + number(pointer.interactionPinch?.sampleIntervalMs, 1) + " ms",
+          "FAST PINCH " + (pointer.interactionPinch?.fastTapState || "IDLE") + " · tap " + yesNo(pointer.interactionPinch?.fastTap) + " · valley " + number(pointer.interactionPinch?.fastTapValley, 3),
+          "RELEASE " + (pointer.interactionPinch?.releaseReason || "--") + " · assist " + yesNo(pointer.interactionPinch?.releaseAssist),
           "LATCH " + (pointer.latchedTarget || "NONE") + " · age " + number(pointer.latchAge) + " ms",
           "CLICK candidate " + yesNo(pointer.clickCandidate) + " · cooldown " + number(pointer.cooldownRemaining) + " ms",
           "SWIPE " + (pointer.swipeIntent?.state || "IDLE") + " · " + (pointer.swipeIntent?.cancelReason || "--") + " · direction " + (pointer.swipeIntent?.direction || "--"),
@@ -508,8 +545,12 @@ export function createUI(events) {
         context.arc(tip.x, tip.y, 14, -Math.PI / 2, -Math.PI / 2 + hand.gesture.stability * Math.PI * 2);
         context.stroke();
       }
-      const inputPinch = Boolean(hand.interactionPinch?.on || hand.pinch?.raw);
-      if (inputPinch) {
+      // Visual thumb↔index contact must represent the current physical sample,
+      // not the wider interaction hysteresis latch. This makes release feedback
+      // immediate while the action layer can still use a small safety hysteresis.
+      const visualPinch = Boolean(hand.interactionPinch?.visualContact);
+      const inputPinch = Boolean(hand.interactionPinch?.on);
+      if (visualPinch) {
         context.save();
         context.strokeStyle = hand.interactionPinch?.interactionPinch ? "#7fffd4" : "#45dbff";
         context.lineWidth = hand.interactionPinch?.interactionPinch ? 2.4 : 1.6;
@@ -656,6 +697,7 @@ export function createUI(events) {
     })
   }]));
   const checkDialog = byId("system-check-dialog");
+  const welcomeDialog = byId("welcome-dialog");
   let hover = null, checkOpener = null, audioContext = null, audioError = false;
   let lastToneAt = -Infinity;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -667,7 +709,7 @@ export function createUI(events) {
     return { x: clamp(point.x, bounds.left, bounds.left + bounds.width),
       y: clamp(point.y, bounds.top, bounds.top + bounds.height) };
   }
-  function pointerScope() { return elements.drawer.open ? elements.drawer : checkDialog.open ? checkDialog : document; }
+  function pointerScope() { return welcomeDialog.open ? welcomeDialog : elements.drawer.open ? elements.drawer : checkDialog.open ? checkDialog : document; }
   function targetLabel(target) { return target ? (target.getAttribute("aria-label") || target.textContent || target.id).trim().slice(0, 80) : null; }
   function targetBounds(target) {
     const r = target.getBoundingClientRect();
@@ -751,7 +793,7 @@ export function createUI(events) {
     for (const target of next) if (!handHovers.has(target)) { target.classList.add("gesture-hover"); handHovers.add(target); }
   }
   function isCriticalTarget(target) {
-    return target && ["camera", "draw-clear", "spatial-confirm-delete", "spatial-delete", "reset-settings", "settings-reset", "safe-stop"].includes(target.dataset.action);
+    return target && ["camera", "draw-clear", "spatial-confirm-delete", "spatial-delete", "spatial-3d-confirm-delete", "spatial-3d-delete", "spatial-confirm-load", "system-reset", "reset-settings", "settings-reset", "safe-stop"].includes(target.dataset.action);
   }
   function setHover(target) {
     if (target === hover) return;
@@ -822,7 +864,15 @@ export function createUI(events) {
     target.classList.remove("gesture-selected");
     target.classList.add("gesture-selected");
     window.setTimeout(() => target.classList.remove("gesture-selected"), 240);
-    target.click();
+    // HTMLElement exposes .click(), SVGElement does not in every Chromium path.
+    // Spatial SVG objects are normally routed through the surface controller, but
+    // this defensive dispatch prevents a malformed/transient UI capture from
+    // crashing the entire Spatial mode.
+    if (typeof target.click === "function") target.click();
+    else {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, view: window });
+      target.dispatchEvent(event);
+    }
     return true;
   }
   function isScrollTarget(target, scope = pointerScope()) {
@@ -865,7 +915,23 @@ export function createUI(events) {
       (pointerScope() !== document ? byId("settings-scroll-area") : byId(mode === "home" ? "home-content" : "mode-" + mode));
     return isScrollTarget(target) ? applyScroll(target, direction * target.clientHeight * 0.6) : 0;
   }
-  function isModalOpen() { return elements.drawer.open || checkDialog.open; }
+  function isModalOpen() { return welcomeDialog.open || elements.drawer.open || checkDialog.open; }
+  function openWelcome() {
+    if (welcomeDialog.open || elements.drawer.open || checkDialog.open) return false;
+    if (typeof welcomeDialog.showModal !== "function") {
+      notify("Quick Demo requires a current Chrome or Edge browser.", "warning");
+      return false;
+    }
+    welcomeDialog.showModal();
+    document.body.classList.add("drawer-open");
+    return true;
+  }
+  function closeWelcome() { if (welcomeDialog.open) welcomeDialog.close(); }
+  welcomeDialog.addEventListener("cancel", (event) => event.preventDefault());
+  welcomeDialog.addEventListener("close", () => {
+    document.body.classList.remove("drawer-open");
+    events.dispatchEvent(new Event("welcomeClosed"));
+  });
   function openSystemCheck(opener, state) {
     if (typeof checkDialog.showModal !== "function") { notify("System Check requires a current Chrome or Edge browser.", "warning"); return; }
     checkOpener = opener || document.activeElement;
@@ -953,7 +1019,8 @@ export function createUI(events) {
     element: byId, setText, mapPoint, smoothPoint, viewportBounds, clampPoint, hitTarget, setHover,
     pointerScope, targetLabel, targetBounds, boundsUnchanged, createStableHover, targetAtPoint,
     resolveScrollTarget, scrollRailTarget, isScrollTarget, scrollLabel, applyScroll,
-    renderCursor, renderHandPointers, setHandHovers, pointInside, isCriticalTarget, activateTarget, scrollPage, isModalOpen, openSystemCheck, closeSystemCheck,
+    renderCursor, renderHandPointers, setHandHovers, pointInside, isCriticalTarget, activateTarget, scrollPage, isModalOpen,
+    openWelcome, closeWelcome, openSystemCheck, closeSystemCheck,
     unlockAudio, tone, renderFeedback, disposeAudio,
     renderMode, renderShell, renderTelemetry, renderLog,
     renderSettingsDefaults, renderFullscreen, drawHands, clearHands,

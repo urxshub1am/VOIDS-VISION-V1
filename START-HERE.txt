@@ -1,0 +1,134 @@
+VOIDS VISION V1.5.4 — ADAPTIVE MOTION SMOOTHING
+
+1. Extract this ZIP into a NEW empty folder. Do not merge it over an older VOIDS VISION version.
+2. Open the VOIDS-VISION-V1.5.4 folder in VS Code.
+3. Run index.html through Live Server / localhost (do not use file://).
+4. Use current Chrome or Edge and allow camera permission.
+
+
+V1.5.4 ADAPTIVE MOTION SMOOTHING
+- Pointer aim is stabilized against palm motion instead of relying only on fingertip samples.
+- Pinch/capture freezes fingertip offset learning so finger curl does not kick the cursor.
+- Low-FPS High Precision is less sticky while deliberate movement stays responsive.
+- Sparse tracking samples are visually resampled for smoother cursor travel.
+- Spatial hover follows the visible pointer; empty-space aim no longer forces full 3D redraws.
+- 3D material/bounds work is cached/throttled and active hand transforms interpolate visually.
+- V1.5.3 SVG/runtime recovery and all V1.5.2 reliability protections remain preserved.
+
+V1.5.3 RUNTIME + AIM STABILITY
+- Spatial SVG surface releases no longer leak into the normal DOM click path (`target.click` crash fixed).
+- Generic Spatial input/UI faults no longer force a healthy WebGL scene into Canvas fallback.
+- Shape / Hologram Library can self-restore if its DOM nodes are lost during recovery.
+- High Precision aim adds extra low-FPS micro-jitter damping while deliberate movement stays responsive.
+- V1.5.2 tracking/reacquisition/free-space transform reliability remains preserved.
+
+V1.5.2 TRACKING RELIABILITY
+- H1/H2 identity is preserved through ambiguous hand overlap instead of creating fresh IDs.
+- Low-FPS tracking/reacquisition timing adapts to the measured inference rate.
+- Critical pinch still requires two real samples, but slow cameras no longer wait unnecessarily for a third sample.
+- Short Anchor/Manipulator gaps freeze the transform, then rebase before resuming to prevent jumps.
+- Free-space palm control and 3D transforms use adaptive jitter smoothing plus bounded transform slew.
+- AUTO intent selection re-centers the baseline when SCALE/ROTATE locks, preventing the lock frame from jumping the object.
+- Very low FPS triggers tracking-priority 3D rendering sooner.
+
+V1.5.4 QUICK CHECK
+1. Hold the index finger still at 7–15 FPS: aim should be calmer but not stuck.
+2. Move deliberately left/right: cursor should follow without stop-then-jump behavior.
+3. Pinch/release repeatedly: finger curl should not kick the cursor sideways.
+4. Check that visible cursor and hover highlight stay aligned.
+5. In Spatial, move over empty space and manipulate one object; 3D should feel lighter/smoother.
+6. Confirm V1.5.3 SVG click error and false Canvas fallback do not return.
+
+V1.5.3 QUICK CHECK
+- Add a Holo Cube, grab it as Anchor, then join the second hand as Manipulator.
+- In AUTO, move the second hand radially and confirm HUD locks SCALE without rotating.
+- Release only the second hand, re-pinch, move it in an arc and confirm HUD locks ROTATE without changing scale.
+- While both hands are active, move the pair together and confirm the object can still translate.
+- Test SCALE, ROTATE and FREE forced modes.
+- Toggle Snap ON and confirm gesture rotation uses 15-degree steps and scale uses 0.1 steps.
+- Confirm one completed Anchor session remains one Undo/Redo edit.
+
+V1.4.1 STABILITY FIXES
+- Reset Transform restores each native shape's real default orientation instead of forcing every rotation to 0°.
+- Undo/Redo imported-model history is memory-bounded; heavy editing may prune the oldest undo/farthest redo history instead of allowing unbounded RAM growth.
+- Image hologram history no longer repeatedly deep-copies large Base64 payloads during normal edits.
+- Portable workspace JSON warns around 32 MB and is capped at 64 MB. The existing model import limit remains 14 MB per selection and 12 distinct live imported-model assets.
+- Imported models auto-play one valid animation clip instead of several clips at the same time.
+- PNG export snapshots the WebGL layer immediately to reduce blank/missing 3D exports.
+- Three.js model-loader module requests time out after 12 seconds and failed model nodes retry after leaving/re-entering Spatial.
+- Hidden objects are blocked from precise/keyboard/gesture transforms until shown again.
+- Accidental model-file drops outside the Holo board/drop zone no longer navigate the browser away from an unsaved workspace.
+- Draco/Meshopt/BasisU-compressed glTF files are intentionally rejected in this build; export an uncompressed GLB for the most reliable import.
+
+V1.4.1 QUICK CHECK
+- Add a Holo Ring, rotate it, Reset Transform, and confirm its default tilt returns.
+- Add/rename/transform an object, then verify Undo/Redo.
+- Hide a selected object and confirm keyboard/precise transforms do not move it; SHOW must restore access.
+- Lock an object and confirm drag/transform/delete remain blocked.
+- Import assets/test-models/voids-test-tetra.glb and confirm Model Status becomes READY.
+- Save, reload, and verify 2D + 3D + image/model data returns.
+- Export PNG with visible 3D content and verify the 3D layer is present in the file.
+- Test one model-file drop outside the Holo board; the page should remain open and show a warning.
+
+
+NEW IN V1.4 — SPATIAL WORKSPACE PRO
+- Scene Objects list lets you select every 3D object, including hidden objects.
+- Rename 3D objects; names persist in Workspace Save/Load.
+- Hide/Show and Lock/Unlock controls are available per object. Locked objects cannot be moved, transformed, or deleted until unlocked.
+- Precise transform controls: Move X/Y/Z, Rotate X/Y/Z, and uniform Scale. Each step is Undo/Redo-safe.
+- Focus Selected moves the 3D camera target to the selected object. Scene Center returns the 3D view to origin.
+- Geometry telemetry shows cached mesh/triangle counts when WebGL data is ready.
+- Keyboard: Arrows = X/Y, Page Up/Down = Z, [ ] = rotate Y, -/+ = scale, F = focus, L = lock. Shift makes movement steps larger.
+- Workspace schema is now v3. Older schema-v1/v2 projects remain supported.
+
+V1.4 QUICK CHECK
+- Add a Holo Cube and rename it.
+- Move X/Y/Z with the precise controls, rotate it, scale it, then Undo/Redo.
+- Lock it and confirm mouse/gesture drag + transform/delete are blocked.
+- Hide it and recover it from Scene Objects using SHOW.
+- Use Focus Selected, then Scene Center.
+- Import assets/test-models/voids-test-tetra.glb and confirm Model Status becomes READY.
+- Save the workspace, reload it, and confirm names / lock / visibility / transforms persist.
+
+NEW IN V1.3.2
+- Real 3D import accepts GLB, GLTF, OBJ, STL and FBX.
+- The file picker shows all files. Unsupported formats now produce a clear error instead of silently disappearing.
+- GLB is still the recommended format.
+- Import limit: 14 MB total per model selection.
+- Once a 3D object is grabbed by the Anchor hand, the second hand NO LONGER needs to aim at the same object or stay over the Holo board.
+- Keep the second hand physically separate, place it anywhere in camera view, pinch, and it joins as Manipulator.
+- Change the distance/angle between hands to scale and rotate. Releasing Manipulator leaves Anchor holding.
+
+3D IMPORT NOTES
+- GLTF: select .gltf + required .bin + PNG/JPG/WebP companion files together.
+- OBJ: geometry imports as a holographic model. External MTL texture packages are not required for the hologram look.
+- STL: geometry-only import.
+- FBX: self-contained files work best; external texture dependencies may not be portable.
+- ZIP files must be extracted first.
+- Very large/high-poly models can reduce FPS. The app rejects imports over 14 MB.
+- Workspace JSON files are VOIDS VISION project files, not 3D models.
+
+QUICK TEST
+- First use the included assets/test-models/voids-test-tetra.glb.
+- Then test one downloaded OBJ/GLB under 14 MB.
+- Grab the model with one hand.
+- Bring the second hand into a different part of the camera view so the hands do not overlap.
+- Pinch with the second hand anywhere in camera view while keeping the two palms a short physical distance apart.
+- Scale/rotate, release second hand, then release Anchor.
+- Save the workspace, reload it, and confirm the imported model returns.
+
+Camera frames and imported model processing stay local in the browser. Loader modules are fetched from the pinned Three.js CDN used by the app.
+
+
+V1.3.3 IMPORT FALLBACK
+- The native picker explicitly supports GLB / GLTF / OBJ / STL / FBX.
+- If Windows still hides a model, drag the file from Explorer onto the 3D MODEL DROP ZONE or directly onto the Holo board.
+- For GLTF with external files, drag/select the .gltf + .bin + textures together.
+
+V1.3.4 HARDENING
+- Import and reload now enforce the same 12 distinct imported-model asset limit.
+- Large embedded model assets are cleaned up once they are no longer reachable from the workspace or Undo/Redo history.
+- Concurrent model imports are blocked; drag/drop highlight cleanup is safer.
+- Model loader failures are shown more clearly in the UI.
+- Native model picker activation is mouse/keyboard-only; drag/drop remains the gesture-friendly fallback.
+- Destructive/replace/reset controls do not use the fast-pinch shortcut.
