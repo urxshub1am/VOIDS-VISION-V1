@@ -1,5 +1,7 @@
 // Retained document geometry. This module has no DOM, camera, or gesture rules.
 export const WORKSPACE = Object.freeze({ width: 1200, height: 800, grid: 25, minSize: 24, maxObjects: 120, historyLimit: 40 });
+const HISTORY_MODEL_ASSET_BUDGET = 48 * 1024 * 1024;
+const HISTORY_MODEL_ASSET_LIMIT = 4;
 export const SHAPES = Object.freeze([
   ["line", "Line", "basic", 180, 0], ["arrow", "Arrow", "basic", 180, 0],
   ["rectangle", "Rectangle", "basic", 180, 110], ["rounded", "Rounded Rectangle", "basic", 180, 110],
@@ -13,9 +15,45 @@ export const SHAPES = Object.freeze([
   ["terminal", "Start / End Block", "diagram", 190, 90], ["input", "Input / Output", "diagram", 200, 110],
   ["database", "Database / Cylinder", "diagram", 170, 150], ["callout", "Callout / Label", "diagram", 200, 120]
 ].map(([type, label, category, width, height]) => Object.freeze({ type, label, category, width, height })));
-export const PALETTE = Object.freeze(["#45dbff", "#edf6ff", "#b99cff", "#5ef0b5", "#ffbd70", "#102b40"]);
+export const PALETTE = Object.freeze(["#45dbff", "#9af2ff", "#6d8dff", "#edf6ff", "#b99cff", "#ff7ddb", "#5ef0b5", "#ffbd70", "#ff6b6b", "#102b40"]);
 export const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const copy = (value) => structuredClone(value);
+const clone3DObject = object => {
+  if (!object || typeof object !== "object") return object;
+  const cloned = { ...object };
+  if (object.position) cloned.position = { ...object.position };
+  if (object.rotation) cloned.rotation = { ...object.rotation };
+  if (object.scale) cloned.scale = { ...object.scale };
+  // Keep immutable Base64 strings by reference instead of structured-cloning megabytes on every edit.
+  if (object.image) cloned.image = { ...object.image };
+  if (object.model) cloned.model = { ...object.model };
+  return cloned;
+};
+const cloneSnapshot = snapshot => ({
+  objects: copy(snapshot?.objects || []),
+  selectedId: snapshot?.selectedId || null,
+  objects3D: (snapshot?.objects3D || []).map(clone3DObject),
+  selected3DId: snapshot?.selected3DId || null
+});
+const comparable3D = objects => (objects || []).map(object => {
+  const cloned = clone3DObject(object);
+  if (cloned?.image) {
+    // Image pixel payload is immutable after import. Excluding it avoids repeated multi-MB JSON stringify work.
+    cloned.image = { ...cloned.image, dataUrl: `@embedded-image:${String(cloned.image.dataUrl || "").length}` };
+  }
+  return cloned;
+});
+const sameDocumentSnapshot = (before, after) =>
+  JSON.stringify(before.objects || []) === JSON.stringify(after.objects || []) &&
+  JSON.stringify(comparable3D(before.objects3D)) === JSON.stringify(comparable3D(after.objects3D));
+const encodedAssetSize = asset => String(asset?.root?.dataUrl || "").length +
+  (asset?.resources || []).reduce((sum, resource) => sum + String(resource?.dataUrl || "").length, 0);
+
+const cloneAssetRegistry = registry => Object.fromEntries(Object.entries(registry || {}).map(([assetId, asset]) => [assetId, {
+  format: asset?.format,
+  root: asset?.root ? { ...asset.root } : null,
+  resources: Array.isArray(asset?.resources) ? asset.resources.map(resource => ({ ...resource })) : []
+}]));
 const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
 const radians = (angle) => angle * Math.PI / 180;
 export const isLine = (object) => ["line", "arrow", "connector", "double-connector"].includes(object.type);
@@ -95,7 +133,7 @@ export function portPosition(object, port) {
 
 export class SpatialModel {
   constructor() {
-    this.state = { objects: [], selectedId: null, objects3D: [], selected3DId: null, tool: "select", zoom: 1, pan: { x: 0, y: 0 },
+    this.state = { objects: [], selectedId: null, objects3D: [], modelAssets: {}, selected3DId: null, tool: "select", zoom: 1, pan: { x: 0, y: 0 },
       grid: true, snap: false, background: "dark", status: "READY", manipulation: null,
       editing: false, pendingDeleteId: null, pending3DDeleteId: null, undoCount: 0, redoCount: 0, revision: 0 };
     this.nextId = 1; this.past = []; this.future = []; this.transaction = null; this.drag = null;
@@ -103,19 +141,71 @@ export class SpatialModel {
   }
   get selected() { return this.state.objects.find(o => o.id === this.state.selectedId) || null; }
   get(id) { return this.state.objects.find(o => o.id === id) || null; }
-  snapshot() { return copy({ objects: this.state.objects, selectedId: this.state.selectedId,
-    objects3D: this.state.objects3D || [], selected3DId: this.state.selected3DId || null }); }
+  snapshot() { return {
+    objects: copy(this.state.objects), selectedId: this.state.selectedId,
+    objects3D: (this.state.objects3D || []).map(clone3DObject), selected3DId: this.state.selected3DId || null
+  }; }
+  referencedModelAssetIds() {
+    const ids = new Set();
+    const collect = objects => {
+      for (const object of objects || []) if (object?.type === "holo-model" && object.model?.assetId) ids.add(object.model.assetId);
+    };
+    collect(this.state.objects3D);
+    for (const entry of [...this.past, ...this.future]) { collect(entry?.before?.objects3D); collect(entry?.after?.objects3D); }
+    if (this.transaction) collect(this.transaction.objects3D);
+    return ids;
+  }
+  pruneModelAssets() {
+    const assets = this.state.modelAssets;
+    if (!assets || typeof assets !== "object") return 0;
+    const keep = this.referencedModelAssetIds();
+    let removed = 0;
+    for (const assetId of Object.keys(assets)) if (!keep.has(assetId)) { delete assets[assetId]; removed++; }
+    return removed;
+  }
+  enforceHistoryAssetBudget() {
+    const assets = this.state.modelAssets;
+    if (!assets || typeof assets !== "object" || (!this.past.length && !this.future.length)) return 0;
+    const live = new Set();
+    for (const object of this.state.objects3D || []) if (object?.type === "holo-model" && object.model?.assetId) live.add(object.model.assetId);
+    const orphanStats = (past = this.past, future = this.future) => {
+      const ids = new Set();
+      const collect = objects => {
+        for (const object of objects || []) {
+          const assetId = object?.type === "holo-model" ? object.model?.assetId : null;
+          if (assetId && !live.has(assetId) && assets[assetId]) ids.add(assetId);
+        }
+      };
+      for (const entry of [...past, ...future]) { collect(entry?.before?.objects3D); collect(entry?.after?.objects3D); }
+      const bytes = [...ids].reduce((sum, assetId) => sum + encodedAssetSize(assets[assetId]), 0);
+      return { ids, bytes };
+    };
+    let trimmed = 0;
+    while (this.past.length || this.future.length) {
+      const current = orphanStats();
+      if (current.ids.size <= HISTORY_MODEL_ASSET_LIMIT && current.bytes <= HISTORY_MODEL_ASSET_BUDGET) break;
+      const pastCandidate = this.past.length ? orphanStats(this.past.slice(1), this.future) : null;
+      const futureCandidate = this.future.length ? orphanStats(this.past, this.future.slice(1)) : null;
+      const score = candidate => candidate ? candidate.bytes + candidate.ids.size * 1024 : Infinity;
+      if (score(pastCandidate) <= score(futureCandidate)) this.past.shift();
+      else this.future.shift(); // Drop the farthest redo entry, never the immediate redo at the array end.
+      trimmed++;
+    }
+    if (trimmed) this.pruneModelAssets();
+    return trimmed;
+  }
   changed() { this.state.revision++; this.state.undoCount = this.past.length; this.state.redoCount = this.future.length; }
   begin() { if (!this.transaction) this.transaction = this.snapshot(); }
   commit() {
     if (!this.transaction) return false;
     const before = this.transaction, after = this.snapshot(); this.transaction = null;
     // Selection alone is not an edit and must not fill undo history.
-    if (JSON.stringify(before.objects) === JSON.stringify(after.objects) &&
-        JSON.stringify(before.objects3D || []) === JSON.stringify(after.objects3D || [])) return false;
+    if (sameDocumentSnapshot(before, after)) return false;
     this.past.push({ before, after });
     if (this.past.length > WORKSPACE.historyLimit) this.past.shift();
-    this.future.length = 0; this.changed(); return true;
+    this.future.length = 0;
+    this.enforceHistoryAssetBudget();
+    this.pruneModelAssets(); this.changed(); return true;
   }
   select(id) {
     const next = this.get(id)?.id || null;
@@ -402,7 +492,8 @@ export class SpatialModel {
     this.transaction = null; this.drag = null; this.anchorEdit = null;
     this.past.length = 0; this.future.length = 0;
     this.state.objects = copy(project.objects2D);
-    this.state.objects3D = copy(project.objects3D);
+    this.state.objects3D = (project.objects3D || []).map(clone3DObject);
+    this.state.modelAssets = cloneAssetRegistry(project.assets3D);
     this.state.selectedId = null; this.state.selected3DId = null;
     this.state.tool = "select";
     this.state.zoom = clamp(project.view?.zoom ?? 1, 0.5, 2.5);
@@ -422,20 +513,20 @@ export class SpatialModel {
       return Number.isFinite(id) ? Math.max(next, id + 1) : next;
     }, 1);
     for (const object of this.state.objects) if (isLine(object)) lineGeometry(object);
-    this.updateConnections(); this.order(); this.changed();
+    this.updateConnections(); this.order(); this.pruneModelAssets(); this.changed();
     return true;
   }
   undo() {
     this.finishAnchor();
     this.finish(); const entry = this.past.pop(); if (!entry) return false;
-    this.future.push(entry); Object.assign(this.state, copy(entry.before)); this.state.pendingDeleteId = null; this.state.pending3DDeleteId = null;
-    this.state.status = this.selected ? "SELECTED" : "READY"; this.changed(); return true;
+    this.future.push(entry); Object.assign(this.state, cloneSnapshot(entry.before)); this.state.pendingDeleteId = null; this.state.pending3DDeleteId = null;
+    this.state.status = this.selected ? "SELECTED" : (this.state.selected3DId ? "3D SELECTED" : "READY"); this.enforceHistoryAssetBudget(); this.pruneModelAssets(); this.changed(); return true;
   }
   redo() {
     this.finishAnchor();
     this.finish(); const entry = this.future.pop(); if (!entry) return false;
-    this.past.push(entry); Object.assign(this.state, copy(entry.after)); this.state.pendingDeleteId = null; this.state.pending3DDeleteId = null;
-    this.state.status = this.selected ? "SELECTED" : "READY"; this.changed(); return true;
+    this.past.push(entry); Object.assign(this.state, cloneSnapshot(entry.after)); this.state.pendingDeleteId = null; this.state.pending3DDeleteId = null;
+    this.state.status = this.selected ? "SELECTED" : (this.state.selected3DId ? "3D SELECTED" : "READY"); this.enforceHistoryAssetBudget(); this.pruneModelAssets(); this.changed(); return true;
   }
   zoom(value) {
     const next = Math.round(clamp(value, 0.5, 2.5) * 100) / 100, before = this.state.zoom;

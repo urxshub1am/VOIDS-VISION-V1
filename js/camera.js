@@ -1,7 +1,10 @@
 export const CAMERA_PRESETS = Object.freeze({
-  performance: { width: 640, height: 480 },
-  balanced: { width: 640, height: 480 },
-  quality: { width: 1280, height: 720 }
+  // Performance asks for a higher source frame rate when the webcam supports it.
+  // Browsers/hardware may still negotiate 30 FPS (or less in low light); the
+  // actual track setting is always shown in diagnostics.
+  performance: { width: 480, height: 360, frameRate: 60 },
+  balanced: { width: 640, height: 480, frameRate: 30 },
+  quality: { width: 1280, height: 720, frameRate: 30 }
 });
 
 export class CameraError extends Error {
@@ -157,7 +160,7 @@ export class CameraController {
         video: {
           width: { ideal: size.width },
           height: { ideal: size.height },
-          frameRate: { ideal: 30, max: 30 },
+          frameRate: { ideal: size.frameRate || 30, max: size.frameRate || 30 },
           facingMode: "user"
         }
       });

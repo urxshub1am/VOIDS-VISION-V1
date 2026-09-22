@@ -4,7 +4,7 @@ export const GESTURE_DEFAULTS = Object.freeze({
   holdMs: 350, pinchHoldMs: 320, cooldownMs: 500, swipeCooldownMs: 700,
   confidenceThreshold: 0.70, candidateThreshold: 0.50,
   pinchEnter: 0.28, pinchExit: 0.40, pinchMinReach: 0.45,
-  releaseMs: 150, maxFrameGapMs: 200, minConfirmFrames: 3,
+  releaseMs: 150, maxFrameGapMs: 300, minConfirmFrames: 3,
   historyMs: 650, historyLimit: 32,
   swipeDistance: 0.20, swipeMinDurationMs: 120, swipeArmMs: 200,
   swipeMinSamples: 4, swipeConsistency: 0.82, swipeHorizontalRatio: 0.85,
@@ -377,9 +377,12 @@ export class GestureEngine {
       const wasPinching = memory.rawPinch;
       const thumbIndexFolded = geometry.extension.thumb < 0.40 &&
         geometry.extension.index < 0.25;
-      const edgeEnter = this.config.pinchEnter + 0.035 * edge;
-      const edgeExit = this.config.pinchExit + 0.045 * edge;
-      const edgeReach = Math.max(0.34, this.config.pinchMinReach - 0.055 * edge);
+      // Keep pinch contact conservative at frame edges. Fast UI taps are
+      // recovered by interactionSignals' trajectory detector; the static
+      // gesture label should not stay latched on a visibly open thumb/index gap.
+      const edgeEnter = Math.min(0.315, this.config.pinchEnter + 0.012 * edge);
+      const edgeExit = Math.min(0.395, Math.max(edgeEnter + 0.075, this.config.pinchExit + 0.012 * edge));
+      const edgeReach = Math.max(0.36, this.config.pinchMinReach - 0.030 * edge);
       memory.rawPinch = geometry.pinchDistance <=
         (wasPinching ? edgeExit : edgeEnter) &&
         geometry.pinchReach >= edgeReach * (wasPinching ? 0.8 : 1) &&

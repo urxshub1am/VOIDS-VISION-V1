@@ -2,10 +2,12 @@ import { createInteractionPinch, createSwipeIntent, SIGNAL_TUNING } from "./inte
 import { createHandPointer } from "./pointerMode.js";
 import { createGestureScroll, SCROLL_TUNING } from "./gestureScroll.js";
 import { PRECISION_TUNING } from "./precision.js";
+import { createMotionTracker } from "./motionEngine.js";
 
 // Gesture detection is evidence. Only this arbiter grants permission to act.
 export const MODE_PERMISSIONS = Object.freeze({
   home: Object.freeze(["pointer", "click", "scroll", "pause"]),
+  learn: Object.freeze(["pointer", "click", "scroll", "diagnostics"]),
   pointer: Object.freeze(["pointer", "click", "scroll", "pause"]),
   "air-draw": Object.freeze(["pointer", "click", "scroll", "draw", "pause", "tools"]),
   presentation: Object.freeze(["pointer", "click", "laser", "swipe", "confirm", "pause"]),
@@ -14,7 +16,7 @@ export const MODE_PERMISSIONS = Object.freeze({
   spatial: Object.freeze(["pointer", "click", "scroll", "object", "transform", "workspace", "pause"]),
   settings: Object.freeze(["pointer", "click", "scroll"])
 });
-export const INTERACTION_TUNING = Object.freeze({ clickMotion: 16, sameTargetMs: 300 });
+export const INTERACTION_TUNING = Object.freeze({ clickMotion: 16, sameTargetMs: 300, spatialCaptureGraceMs: 650 });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const activePinch = h => Boolean(h?.interactionPinch?.surfaceReady);
 export function validInteractionHand(hand, now) {
@@ -40,9 +42,11 @@ export function createInteractionEngine(context) {
   const pointers = () => Object.values(state.runtime.handPointers);
   const handAt = id => state.hands.find(h => h.id === id);
   function inGrace(id, now) {
-    const input = inputs.get(id), hand = handAt(id);
-    return Boolean(input?.lastGood && hand && !hand.tracking.ambiguous && hand.tracking.state !== "LOST" &&
-      now - input.lastGood.tracking.lastSeenAt <= SIGNAL_TUNING.graceMs);
+    const input = inputs.get(id), hand = handAt(id), capture = captures.get(id);
+    const spatialHold = capture?.owner === "spatial" && ["OBJECT_CAPTURE", "TRANSFORM_CAPTURE"].includes(capture.kind);
+    const grace = spatialHold ? INTERACTION_TUNING.spatialCaptureGraceMs : SIGNAL_TUNING.graceMs;
+    return Boolean(input?.lastGood && hand && (spatialHold || !hand.tracking.ambiguous) &&
+      (spatialHold || hand.tracking.state !== "LOST") && now - input.lastGood.tracking.lastSeenAt <= grace);
   }
   function trustedHand(id, now) { return validInteractionHand(handAt(id), now) ? handAt(id) : inGrace(id, now) ? inputs.get(id).lastGood : null; }
   const note = (message) => (context.interactionEvent || action)(message);
@@ -81,14 +85,14 @@ export function createInteractionEngine(context) {
   }
   function cancelHand(id, reason = "TRACKING_LOST") {
     release(id, reason); const input = inputs.get(id);
-    if (input) { input.pointer.lose(); input.pinch.reset(); input.swipe.reset("TRACKING_LOST"); input.lastGood = null; input.lastTarget = null; input.wasPinching = true; }
+    if (input) { input.pointer.lose(); input.pinch.reset(); input.swipe.reset("TRACKING_LOST"); input.motion?.reset(); input.lastGood = null; input.lastTarget = null; input.wasPinching = true; }
     if (laserId === id) { laserId = null; data.laserOwner = null; }
     expose(id);
   }
   function cancel(reason = "CANCELLED") {
     epoch++;
     for (const id of [...captures.keys()]) release(id, reason);
-    for (const input of inputs.values()) { input.pointer.disarm(); input.pinch.reset(); input.swipe.reset(); input.lastGood = null; input.lastTarget = null; input.wasPinching = true; }
+    for (const input of inputs.values()) { input.pointer.disarm(); input.pinch.reset(); input.swipe.reset(); input.motion?.reset(); input.lastGood = null; input.lastTarget = null; input.wasPinching = true; }
     laserId = data.laserOwner = data.drawOwner = data.swipeOwner = data.gameOwner = null;
     scroll.cancel(); ui.setHandHovers([]); ui.renderHandPointers(null);
   }
@@ -115,17 +119,37 @@ export function createInteractionEngine(context) {
   function activate(input, capture) {
     const target = capture.target, now = frameNow, id = input.pointer.data.handId;
     if (!capture.ready || capture.moved > (capture.panel ? INTERACTION_TUNING.clickMotion : SIGNAL_TUNING.latchRadius) || !target?.isConnected ||
-        !ui.boundsUnchanged(target, capture.bounds) || !ui.targetAtPoint(target, capture.start, capture.scope, PRECISION_TUNING.hoverPadding)) return;
-    if (now - input.lastActivation < (capture.critical ? state.settings.clickCooldownMs : SIGNAL_TUNING.clickCooldownMs)) return;
+        !ui.boundsUnchanged(target, capture.bounds) || !ui.targetAtPoint(target, capture.start, capture.scope, PRECISION_TUNING.hoverPadding)) return false;
+    if (now - input.lastActivation < (capture.critical ? state.settings.clickCooldownMs : SIGNAL_TUNING.clickCooldownMs)) return false;
     const previous = activated.get(target);
-    if (previous && previous.id !== id && now - previous.at < INTERACTION_TUNING.sameTargetMs) return;
+    if (previous && previous.id !== id && now - previous.at < INTERACTION_TUNING.sameTargetMs) return false;
     activated.set(target, { id, at: now }); input.lastActivation = now;
     data.lastActivationHandId = id;
-    if (context.activate(target, capture.start, capture.scope, { padding: PRECISION_TUNING.hoverPadding, handId: id })) action("CLICK CONFIRMED · " + id);
+    const activatedNow = context.activate(target, capture.start, capture.scope, { padding: PRECISION_TUNING.hoverPadding, handId: id });
+    if (activatedNow) action("CLICK CONFIRMED · " + id);
+    return Boolean(activatedNow);
   }
   function beginCandidate(input, hand, now) {
     const p = input.pointer.data, target = input.pointer.target;
-    if (!p.armed || !permits("click")) return;
+    // During an active Spatial 3D anchor, the second hand may join from free
+    // space. Do not force it through the normal hover/aim arming delay: making
+    // both pointers converge on the object causes real webcam hand occlusion.
+    const freeSpatialJoin = effectiveMode() === "spatial" && permits("transform") &&
+      modes.spatial?.captureTarget?.(hand.id, null, p.filtered) === "manipulator";
+    if (!permits("click")) return;
+    if (freeSpatialJoin) {
+      // A held 3D anchor owns the next secondary pinch globally. Do not route it
+      // through hover/target acquisition: the free hand may be anywhere in the
+      // viewport and must not accidentally click a panel while transforming.
+      captures.set(hand.id, { kind: "TRANSFORM_CAPTURE", owner: "spatial", label: "3D free-space manipulator",
+        target: null, bounds: null, start: { ...p.filtered }, motionStart: { ...p.filtered }, palmStart: { ...hand.geometry.viewCenter },
+        startedAt: now, mode: effectiveMode(), scope: ui.pointerScope(), panel: null, rail: false, surface: "spatial",
+        special: "manipulator", ready: true, moved: 0, critical: false });
+      expose(hand.id);
+      note("FREE-SPACE MANIPULATOR CAPTURE · " + hand.id);
+      return;
+    }
+    if (!p.armed) return;
     const hit = ui.hitTarget(p.filtered.x, p.filtered.y, ui.pointerScope());
     // A target must have been acquired before pinching. Empty panel space can
     // capture scroll; it cannot synthesize a button click under a moving cursor.
@@ -146,15 +170,50 @@ export function createInteractionEngine(context) {
       start: { ...clickPoint }, motionStart: { ...p.filtered }, palmStart: { ...hand.geometry.viewCenter }, startedAt: now, mode: effectiveMode(), scope: ui.pointerScope(),
       panel, rail: Boolean(panel && ui.scrollRailTarget?.(p.filtered) === panel), surface, special, ready: false, moved: 0, critical: ui.isCriticalTarget(selected) });
   }
+  function activateFastTap(input, hand, now) {
+    const p = input.pointer.data;
+    if (!hand.interactionPinch?.fastTap || !p.armed || !permits("click") || captures.has(hand.id)) return false;
+    const recent = input.lastTarget && now - input.targetSeenAt <= SIGNAL_TUNING.latchMs + 120 &&
+      input.targetPoint && distance(p.filtered, input.targetPoint) <= SIGNAL_TUNING.latchRadius + 10;
+    const target = recent && ui.targetAtPoint(input.lastTarget, input.targetPoint, ui.pointerScope(), PRECISION_TUNING.hoverPadding)
+      ? input.lastTarget : input.pointer.target;
+    if (!target?.isConnected || ui.isCriticalTarget(target)) return false;
+    // Fast-tap evidence is intentionally UI-only. Drawing and Spatial object
+    // holds still require a sampled real pinch so we never invent a sustained
+    // gesture from two low-FPS samples.
+    const spatialSurface = ui.element("spatial-surface");
+    const drawSurface = ui.element("draw-surface");
+    if (effectiveMode() === "spatial" && spatialSurface?.contains(target)) return false;
+    if (effectiveMode() === "air-draw" && drawSurface?.contains(target)) return false;
+    const start = recent ? input.targetPoint : p.filtered;
+    const capture = {
+      kind: "CLICK_CAPTURE", owner: "ui", label: ui.targetLabel(target), target,
+      bounds: ui.targetBounds(target), start: { ...start }, motionStart: { ...start },
+      startedAt: now, mode: effectiveMode(), scope: ui.pointerScope(), panel: null,
+      surface: null, ready: true, moved: 0, critical: false, fastTap: true
+    };
+    const didActivate = activate(input, capture);
+    if (!didActivate) return false;
+    note("FAST PINCH TAP · " + hand.id + " · " + ui.targetLabel(target));
+    input.pointer.disarm();
+    return true;
+  }
+
   function updatePinch(input, hand, now) {
     const p = input.pointer.data, id = hand.id;
     let c = captures.get(id);
+    if (!c && hand.interactionPinch?.fastTap && activateFastTap(input, hand, now)) return;
     if (c && c.kind !== "SWIPE_CAPTURE" && c.kind !== "GAME_CAPTURE" && !hand.interactionPinch.on) {
       const origin = c.motionStart || c.start;
       c.moved = Math.max(c.moved || 0, distance(p.filtered, origin));
       const dx = p.filtered.x - origin.x, dy = p.filtered.y - origin.y;
       const releasedDrag = c.panel && Math.abs(dy) >= SCROLL_TUNING.dragPixels && Math.abs(dy) > Math.abs(dx) * SCROLL_TUNING.verticalRatio;
-      const click = hand.interactionPinch.normalizedDistance > SIGNAL_TUNING.exit &&
+      const releaseEvidence = hand.interactionPinch.normalizedDistance > SIGNAL_TUNING.exit ||
+        (hand.interactionPinch.releasedThisFrame && hand.interactionPinch.releaseReason === "OPENING_VELOCITY");
+      // Spatial / Air Draw surface captures are mode-owned interactions, not DOM
+      // buttons. If a pinch releases before the surface capture fully promotes,
+      // never synthesize a click on an SVG <g> or canvas surface target.
+      const click = !c.surface && releaseEvidence &&
         (!c.palmStart || distance(hand.geometry.viewCenter, c.palmStart) <= 0.06) && !releasedDrag && (c.kind === "PINCH_ARMING" || c.kind === "CLICK_CAPTURE");
       release(id); if (click) activate(input, c); return;
     }
@@ -258,13 +317,14 @@ export function createInteractionEngine(context) {
       let input = inputs.get(hand.id);
       if (!input) {
         input = { pointer: createHandPointer({ handId: hand.id, state, ui }), wasPinching: true,
-          pinch: createInteractionPinch(), swipe: createSwipeIntent(), lastGood: null, targetSeenAt: -Infinity, lastTarget: null, targetPoint: null,
-          lastActivation: -Infinity };
+          pinch: createInteractionPinch(), swipe: createSwipeIntent(), motion: createMotionTracker(hand.id), lastGood: null,
+          targetSeenAt: -Infinity, lastTarget: null, targetPoint: null, lastActivation: -Infinity };
         inputs.set(hand.id, input); state.runtime.handPointers[hand.id] = input.pointer.data;
       }
       if (single && hand !== single) { cancelHand(hand.id, "DUAL_UI_DISABLED"); continue; }
+      hand.motionState = input.motion.update(hand, now, state.camera.height / state.camera.width || 0.75);
       hand.interactionPinch = input.pinch.update(hand, now);
-      input.lastGood = { ...hand, tracking: { ...hand.tracking } };
+      input.lastGood = { ...hand, tracking: { ...hand.tracking }, motionState: { ...hand.motionState } };
       const c = captures.get(hand.id);
       input.pointer.update(hand, now, { captured: Boolean(c && !["PINCH_ARMING", "CLICK_CAPTURE"].includes(c.kind)),
         drawing: c?.kind === "DRAW_CAPTURE", reduced });

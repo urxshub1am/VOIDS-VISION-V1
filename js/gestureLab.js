@@ -72,7 +72,8 @@ export function createGestureLab({ state, ui, action, notify, resetInput, manual
       lastRenderAt = now;
       ui.setText("lab-runtime", state.trackingState.replaceAll("_", " ") + " · " +
         (Number.isFinite(state.performance.fps) ? state.performance.fps.toFixed(1) + " FPS" : "FPS --") + " · " +
-        (Number.isFinite(state.performance.inferenceLatencyMs) ? state.performance.inferenceLatencyMs.toFixed(1) + " ms inference" : "Latency --"));
+        (Number.isFinite(state.performance.inferenceLatencyMs) ? state.performance.inferenceLatencyMs.toFixed(1) + " ms inference" : "Latency --") +
+        " · QUALITY " + (state.runtime.trackingQuality || "--"));
     }
   }
   return { enter: render, exit: cancel, cancel, render, tick, onGesture,
