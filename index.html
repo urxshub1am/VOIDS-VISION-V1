@@ -98,7 +98,7 @@
         </button>
 </nav>
 <div class="sidebar-footer">
-<span class="status-chip">V1.5.4 / ADAPTIVE MOTION SMOOTHING</span>
+<span class="status-chip">V1.6 / SPATIAL INTERACTION PRO</span>
 <p>Real-Time Hand Tracking<br>&amp; Gesture Interaction</p>
 <p class="muted">Camera processing stays on-device.</p>
 </div>
@@ -606,7 +606,7 @@
 <div><dt>Dual pointer / magnetic assist / sensitivity</dt><dd id="spatial-diag-preferences">--</dd></div>
 <div><dt>3D selected / kind</dt><dd id="spatial-diag-3d-selected">--</dd></div>
 <div><dt>3D interaction / Anchor / Manipulator</dt><dd id="spatial-diag-3d-control">--</dd></div>
-<div><dt>3D scale / yaw / pitch / roll</dt><dd id="spatial-diag-3d-transform">--</dd></div>
+<div><dt>3D primary / secondary transform</dt><dd id="spatial-diag-3d-transform">--</dd></div>
 <div><dt>3D AUTO evidence · Scale / Rotate</dt><dd id="spatial-diag-3d-evidence">--</dd></div>
 <div><dt>3D render FPS / quality / objects</dt><dd id="spatial-diag-3d-performance">--</dd></div>
 </dl>
@@ -616,7 +616,7 @@
 <details class="details-panel"><summary data-gesture-target="">Recent confirmed gestures</summary><ol aria-label="Recent confirmed gestures" class="event-log" data-gesture-scroll="" id="gesture-history" tabindex="0"><li class="log-empty">No confirmed gestures.</li></ol></details>
 </section><button aria-label="Pinch and drag to scroll Gesture Lab" class="gesture-scroll-rail" data-gesture-target="" data-scroll-rail="mode-gesture-lab" title="Pinch + drag to scroll" type="button"><span aria-hidden="true"></span></button></div><section aria-labelledby="spatial-title" class="mode-panel panel" data-gesture-scroll="" data-mode-panel="spatial" hidden="" id="mode-spatial" tabindex="0">
 <div class="panel-heading"><h2 id="spatial-title">Spatial / Holo workspace</h2><span class="mode-status" id="spatial-workspace-status">READY</span></div>
-<p class="panel-note">Either hand grabs first = ANCHOR. For 3D, the other hand may pinch anywhere away from the Anchor to join = MANIPULATOR. AUTO waits for deliberate motion, then locks that secondary pinch to SCALE or ROTATE; FREE preserves simultaneous transforms. Release the Manipulator to choose again while the Anchor keeps holding. Pinch-drag panels to scroll. Both pinches on empty board control workspace zoom/pan.</p>
+<p class="panel-note">Either hand grabs first = ANCHOR. V1.6 adds one-hand 3D MOVE / ROTATE / DEPTH control: choose the primary mode before grabbing. A second hand can still pinch anywhere away from the Anchor to join as MANIPULATOR for Scale/Rotate. While the Manipulator is active, the Anchor safely returns to XY move. Pinch-drag panels to scroll. Both pinches on empty board control workspace zoom/pan.</p>
 <div aria-label="Workspace tools" class="control-row spatial-toolbar" id="spatial-toolbar">
 <button aria-pressed="true" class="button" data-action="spatial-tool" data-gesture-target="" data-value="select" type="button">Select</button>
 <button aria-pressed="false" class="button" data-action="spatial-tool" data-gesture-target="" data-value="pan" type="button">Pan</button>
@@ -689,6 +689,12 @@
 <div class="spatial-scene-panel">
 <div class="spatial-scene-heading"><strong>Scene objects</strong><span id="spatial-3d-scene-stats">0/0 visible · 0 locked</span></div>
 <div aria-label="3D scene objects" class="spatial-scene-list" id="spatial-3d-scene-list"></div>
+<div class="control-row spatial-group-controls">
+<button class="button" data-action="spatial-3d-group-all" data-gesture-target="" type="button">Group visible</button>
+<button class="button" data-action="spatial-3d-group-clear" data-gesture-target="" type="button">Clear group</button>
+<button class="button" data-action="spatial-3d-group-duplicate" data-gesture-target="" type="button">Duplicate group</button>
+</div>
+<p class="panel-note">Phase 3: use the GROUP button beside scene objects to build a multi-selection. Precise Move / Rotate / Scale controls and keyboard nudges transform the group as one edit and one Undo step. Group actions are gesture-target buttons, so they can be pinch-activated without adding a risky new global gesture. Direct hand grab / free-space two-hand manipulation intentionally remains focused on the active primary object in this phase.</p>
 </div>
 <div class="spatial-3d-name-editor">
 <label for="spatial-3d-name-input">Object name</label>
@@ -698,7 +704,10 @@
 <div><dt>Position X/Y/Z</dt><dd id="spatial-3d-position">--</dd></div>
 <div><dt>Rotation X/Y/Z</dt><dd id="spatial-3d-rotation">--</dd></div>
 <div><dt>Scale</dt><dd id="spatial-3d-scale">--</dd></div>
-<div><dt>Gesture transform</dt><dd><span id="spatial-3d-gesture-mode">AUTO</span> · <span id="spatial-3d-gesture-status">IDLE</span></dd></div>
+<div><dt>Group selection</dt><dd id="spatial-3d-group-value">1 selected</dd></div>
+<div><dt>Primary one-hand control</dt><dd><span id="spatial-3d-primary-mode">MOVE</span></dd></div>
+<div><dt>Alignment assist</dt><dd id="spatial-3d-align-value">ON · --</dd></div>
+<div><dt>Secondary transform</dt><dd><span id="spatial-3d-gesture-mode">AUTO</span> · <span id="spatial-3d-gesture-status">IDLE</span></dd></div>
 <div><dt>Visibility / Lock</dt><dd><span id="spatial-3d-visible-value">--</span> · <span id="spatial-3d-lock-value">--</span></dd></div>
 <div><dt>Geometry</dt><dd id="spatial-3d-geometry">--</dd></div>
 <div><dt>Appearance</dt><dd id="spatial-3d-appearance">--</dd></div>
@@ -706,7 +715,14 @@
 <div><dt>Model status</dt><dd id="spatial-3d-model-status">--</dd></div>
 </dl>
 <div class="spatial-3d-transform-editor">
-<span class="spatial-mini-label">GESTURE TRANSFORM ASSIST</span>
+<span class="spatial-mini-label">ONE-HAND PRIMARY CONTROL</span>
+<div aria-label="3D one-hand primary control" class="control-row spatial-transform-mode" role="group">
+<button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="move" type="button">Move</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="rotate" type="button">Rotate</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="depth" type="button">Depth</button>
+</div>
+<p class="panel-note">MOVE drags in X/Y. With 3D Alignment Assist ON, moving near scene center or another visible 3D object magnetically aligns X/Y and shows a guide. ROTATE suppresses weak cross-axis wobble. DEPTH waits for deliberate toward/away motion before arming. Snap ON still quantizes transforms. Mouse drag always stays Move.</p>
+<span class="spatial-mini-label">SECOND-HAND TRANSFORM ASSIST</span>
 <div aria-label="3D gesture transform mode" class="control-row spatial-transform-mode" role="group">
 <button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="auto" type="button">Auto</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="scale" type="button">Scale</button>
@@ -714,7 +730,7 @@
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="free" type="button">Free</button>
 </div>
 <p class="panel-note">AUTO locks each secondary-hand pinch to Scale or Rotate after deliberate motion. Release and re-pinch to choose again. FREE preserves simultaneous scale + rotation.</p>
-<span class="spatial-mini-label">PRECISE TRANSFORM</span>
+<span class="spatial-mini-label">PRECISE / GROUP TRANSFORM</span>
 <div class="spatial-axis-row"><b>MOVE X</b><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="x" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
 <div class="spatial-axis-row"><b>MOVE Y</b><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="y" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
 <div class="spatial-axis-row"><b>MOVE Z</b><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="-0.1" data-transform-kind="position" type="button">−</button><button class="button" data-action="spatial-3d-adjust" data-axis="z" data-gesture-target="" data-spatial-3d-selected="" data-spatial-3d-transform="" data-step="0.1" data-transform-kind="position" type="button">+</button></div>
@@ -751,7 +767,7 @@
 <p id="spatial-3d-delete-question">Delete selected 3D object?</p>
 <div class="control-row"><button class="button safety" data-action="spatial-3d-confirm-delete" data-gesture-target="" type="button">Confirm delete</button><button class="button" data-action="spatial-3d-cancel-delete" data-gesture-target="" type="button">Keep object</button></div>
 </div>
-<p class="panel-note">V1.5.4 Adaptive Motion Smoothing: V1.5.3 runtime recovery is preserved, with palm-relative pointer stabilization, pinch-safe aim locking, low-FPS visual resampling, and cheaper Spatial 3D redraws for smoother control without sacrificing deliberate motion. AUTO/Scale/Rotate/Free, free-space manipulation, and all V1.4.1 hardening remain intact.</p>
+<p class="panel-note">V1.6 · Spatial Interaction Pro: stable release with one-hand MOVE / ROTATE / DEPTH, restrained 3D alignment, free-space two-hand transforms, multi-selection, group Move/Rotate/Scale, group duplicate, and the V1.5.4 tracking/recovery safeguards. Promoted after the full webcam/GPU RC acceptance pass.</p>
 </section>
 <div class="spatial-property-row"><span>Stroke</span><div class="control-row" id="spatial-stroke-colors"></div></div>
 <div class="spatial-property-row"><span>Fill</span><div class="control-row" id="spatial-fill-colors"></div></div>
@@ -860,20 +876,27 @@
 <legend>Spatial Anchor / Manipulator</legend>
 <button aria-pressed="true" class="button block" data-action="spatial-preference-toggle" data-gesture-target="" data-preference="spatialDualPointer" id="spatial-dual-setting" type="button">Spatial dual pointer · ON</button>
 <button aria-pressed="true" class="button block" data-action="spatial-preference-toggle" data-gesture-target="" data-preference="magneticAimAssist" id="spatial-magnetic-setting" type="button">Magnetic aim assist · ON</button>
+<button aria-pressed="true" class="button block" data-action="spatial-preference-toggle" data-gesture-target="" data-preference="spatial3DAlignAssist" id="spatial-align3d-setting" type="button">3D alignment assist · ON</button>
 <p class="section-label">TRANSFORM SENSITIVITY</p>
 <div aria-label="Spatial transform sensitivity" class="control-row" role="group">
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="transformSensitivity" data-value="low" type="button">Low</button>
 <button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="transformSensitivity" data-value="medium" type="button">Medium</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="transformSensitivity" data-value="high" type="button">High</button>
 </div>
-<p class="section-label">3D TRANSFORM ASSIST</p>
+<p class="section-label">3D ONE-HAND PRIMARY</p>
+<div aria-label="3D one-hand primary mode" class="control-row" role="group">
+<button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="move" type="button">Move</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="rotate" type="button">Rotate</button>
+<button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DPrimaryMode" data-value="depth" type="button">Depth</button>
+</div>
+<p class="section-label">3D SECOND-HAND ASSIST</p>
 <div aria-label="3D transform assist mode" class="control-row" role="group">
 <button aria-pressed="true" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="auto" type="button">Auto</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="scale" type="button">Scale</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="rotate" type="button">Rotate</button>
 <button aria-pressed="false" class="button" data-action="precision-preference" data-gesture-target="" data-preference="spatial3DTransformMode" data-value="free" type="button">Free</button>
 </div>
-<p class="panel-note">Assist expands handle targets without snapping a cursor. AUTO reduces two-hand 3D cross-talk by locking the secondary pinch to Scale or Rotate. FREE permits both at once. Spatial dual pointer OFF disables the other hand joining objects.</p>
+<p class="panel-note">Primary mode controls what one pinching Anchor hand does. 3D Alignment Assist adds restrained center/object alignment only during one-hand MOVE. Secondary AUTO reduces two-hand 3D cross-talk by locking the Manipulator pinch to Scale or Rotate; FREE permits both at once. Spatial dual pointer OFF disables the other hand joining objects.</p>
 </fieldset>
 <fieldset class="precision-settings">
 <legend>System profile</legend>

@@ -128,12 +128,14 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     active:false, selectedId:null, objectCount:0, anchorHandId:null, manipulatorHandId:null,
     phase:"IDLE", rayHit:false, rayObjectId:null, rayPoint:null, scaleRatio:1, yaw:0, pitch:0, roll:0,
     transformIntent:"NONE", scaleEvidence:0, rotateEvidence:0, trackingGuard:"READY",
+    primaryMode:"MOVE", primaryYaw:0, primaryPitch:0, primaryDepth:0, primaryAxis:"FREE", depthArmed:false,
+    alignmentX:null, alignmentY:null, hoverHeld:false,
     renderFps:0, quality:"FULL", backend:"LOADING", webglReady:false, lastReason:null, error:null
   };
 
   let active=false, cssWidth=1, cssHeight=1, dpr=1, dirty=true, lastRender=0, frameCount=0, fpsStart=0, lastSelectionBoundsAt=0, lastSelectionBoundsId=null;
   let anchor=null, manipulator=null, manipulatorArming=null, blockedManipulator=null;
-  let mouseAnchor=false, hoverId=null, lastHoverProbe="";
+  let mouseAnchor=false, hoverId=null, hoverLastHitAt=0, lastHoverProbe="";
   const controlFilters = new Map();
 
   // WebGL renderer state. Three.js is lazy-loaded only when Spatial/Holo is entered.
@@ -602,7 +604,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     const ids=new Set();
     for(const object of model.objects){
       ids.add(object.id); let node=nodes.get(object.id)||makeNode(object);
-      const selected=object.id===model.state.selected3DId, hovered=object.id===hoverId;
+      const selected=object.id===model.state.selected3DId, grouped=!selected&&model.selectedIds.includes(object.id), hovered=object.id===hoverId;
       node.visible=object.visible!==false;
 
       // Display-only transform resampling. Model state remains authoritative and
@@ -621,7 +623,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
       }
       display.at=now;
       node.position.set(display.position.x,display.position.y,display.position.z);
-      const idle=!selected&&!anchor&&idleAllowed()&&["holo-orb","holo-globe","holo-ring","holo-knot","holo-beacon"].includes(object.type);
+      const idle=!selected&&!grouped&&!anchor&&idleAllowed()&&["holo-orb","holo-globe","holo-ring","holo-knot","holo-beacon"].includes(object.type);
       const idleYaw=idle?Math.sin(now/2200+object.idlePhase)*4:0;
       node.rotation.set(display.rotation.x*DEG,(display.rotation.y+idleYaw)*DEG,display.rotation.z*DEG);
       node.scale.set(display.scale.x,display.scale.y,display.scale.z);
@@ -630,7 +632,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
       // Imported models may contain hundreds of materials. V1.5.3 traversed the
       // whole hierarchy on every pointer movement. Re-style only when a visual
       // property / selected / hover state actually changes.
-      const visualKey=[selected?1:0,hovered?1:0,object.visible===false?0:1,tint,glow.toFixed(3),objectOpacity.toFixed(3)].join("|");
+      const visualKey=[selected?1:0,grouped?1:0,hovered?1:0,object.visible===false?0:1,tint,glow.toFixed(3),objectOpacity.toFixed(3)].join("|");
       if(node.userData.visualKey!==visualKey){
         const tintColor=new THREE.Color(tint);
         node.traverse(child=>{
@@ -649,7 +651,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
             const baseOpacity=child.userData?.baseOpacity ?? (isLine ? .68 : .055);
             const glowScale=role==="halo" ? (.35+glow*1.35) : (.72+glow*.42);
             const base=baseOpacity*objectOpacity*glowScale;
-            mat.opacity=selected ? Math.max(base, isLine ? .96 : role==="halo"?.075:.105) : hovered ? Math.max(base, isLine ? .84 : role==="halo"?.062:.075) : base;
+            mat.opacity=selected ? Math.max(base, isLine ? .96 : role==="halo"?.075:.105) : grouped ? Math.max(base, isLine ? .88 : role==="halo"?.066:.082) : hovered ? Math.max(base, isLine ? .84 : role==="halo"?.062:.075) : base;
           }
         });
         node.userData.visualKey=visualKey;
@@ -765,21 +767,69 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     return {primary,secondary,separation:Math.hypot(secondary.x-primary.x,secondary.y-primary.y)};
   }
 
-  function select(id){model.select(id);diagnostic.selectedId=model.state.selected3DId;sceneDirty=true;dirty=true;}
+  function configuredPrimaryMode(){
+    const mode=String(state.settings.spatial3DPrimaryMode||"move").toLowerCase();
+    return ["move","rotate","depth"].includes(mode)?mode:"move";
+  }
+  function handPalmScale(id){
+    const hand=handRecord(id);
+    // Use image-space palm width for depth. It tracks real toward/away camera
+    // motion more directly than MediaPipe's relative Z scale and ignores finger curl.
+    const value=Number(hand?.geometry?.palmWidth2D ?? hand?.geometry?.pinchScale2DBase ?? hand?.handScale ?? hand?.geometry?.scale);
+    return Number.isFinite(value)&&value>1e-6?value:null;
+  }
+  function controlSensitivity(){return ({low:.78,medium:1,high:1.22})[state.settings.transformSensitivity]||1;}
+
+  function select(id,options){model.select(id,options);diagnostic.selectedId=model.state.selected3DId;sceneDirty=true;dirty=true;}
+  function toggleGroup(id){const ids=model.toggleGroup(id);diagnostic.selectedId=model.state.selected3DId;sceneDirty=true;dirty=true;return ids;}
+  function clearGroup(){const changed=model.clearGroup();if(changed){sceneDirty=true;dirty=true;}return changed;}
+  function selectAllVisible(){const ids=model.selectAllVisible();diagnostic.selectedId=model.state.selected3DId;sceneDirty=true;dirty=true;return ids;}
   function clearSelection(){model.select(null);diagnostic.selectedId=null;sceneDirty=true;dirty=true;}
   function create(type,screenPoint){const p=screenToPlane(screenPoint,0),object=model.create(type,p);if(object){action("3D OBJECT CREATED → "+type);sceneDirty=true;dirty=true;}return object;}
-  function startPrimary({handId,screenPoint,now,mouse=false}){
-    const object=hitTest(screenPoint,{padding:22});if(!object)return false;
+  function startPrimary({handId,screenPoint,now,mouse=false,objectId=null}){
+    const object=objectId?model.get(objectId):hitTest(screenPoint,{padding:22});if(!object||object.visible===false)return false;
     if(object.locked){select(object.id);action("3D OBJECT LOCKED → "+object.id);sceneDirty=true;dirty=true;return false;}
     const plane=screenToPlane(screenPoint,object.position.z);
     if(!mouse&&!interaction.claim(handId,"OBJECT_CAPTURE","spatial",object.id,{pending:true}))return false;
     if(!model.startAnchor(object.id,plane,screenPoint)){if(!mouse)interaction.release(handId,"TARGET_UNAVAILABLE",false);return false;}
-    anchor={handId,objectId:object.id,mouse,screen:{...screenPoint},plane,startedAt:now,lastGoodAt:now,recovering:false,recoveryUntil:null,resumedAt:null};mouseAnchor=mouse;select(object.id);
+    const primaryMode=mouse?"move":configuredPrimaryMode();
+    model.beginPrimaryControl(screenPoint,mouse?null:handPalmScale(handId),primaryMode);
+    anchor={handId,objectId:object.id,mouse,screen:{...screenPoint},plane,primaryMode,startedAt:now,lastGoodAt:now,recovering:false,recoveryUntil:null,resumedAt:null};mouseAnchor=mouse;select(object.id,{preserveGroup:true});
     if(handId)controlFilters.delete(handId);
     diagnostic.anchorHandId=handId||"MOUSE";diagnostic.manipulatorHandId=null;diagnostic.phase="ANCHOR";diagnostic.lastReason=null;diagnostic.trackingGuard="READY";
-    action("3D ANCHOR → "+(handId||"MOUSE")+" · "+object.id);sceneDirty=true;dirty=true;return true;
+    diagnostic.primaryMode=primaryMode.toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.alignmentX=diagnostic.alignmentY=null;
+    action("3D ANCHOR → "+(handId||"MOUSE")+" · "+object.id+" · "+diagnostic.primaryMode);sceneDirty=true;dirty=true;return true;
   }
-  function moveAnchor(screenPoint){if(!anchor)return;const object=model.get(anchor.objectId);if(!object)return;anchor.screen={...screenPoint};anchor.plane=screenToPlane(screenPoint,object.position.z);model.moveAnchor(anchor.plane);sceneDirty=true;dirty=true;}
+  function moveAnchor(screenPoint,now=performance.now(),forcedMode=null){
+    if(!anchor)return false;const object=model.get(anchor.objectId);if(!object)return false;
+    anchor.screen={...screenPoint};anchor.plane=screenToPlane(screenPoint,object.position.z);
+    const mode=anchor.mouse?"move":(forcedMode||configuredPrimaryMode());
+    const palmScale=anchor.mouse?null:handPalmScale(anchor.handId);
+    const primarySampleAt=anchor.mouse?null:handRecord(anchor.handId)?.tracking?.lastSeenAt;
+    if(anchor.primaryMode!==mode){
+      model.rebaseAnchor(anchor.plane);model.rebasePrimaryControl(screenPoint,palmScale,mode);anchor.primaryMode=mode;
+      diagnostic.primaryMode=mode.toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.alignmentX=diagnostic.alignmentY=null;
+      diagnostic.lastReason=`PRIMARY MODE → ${diagnostic.primaryMode} · REBASED`;sceneDirty=true;dirty=true;return true;
+    }
+    diagnostic.primaryMode=mode.toUpperCase();
+    if(mode==="move"){
+      const changed=model.moveAnchor(anchor.plane,{snap:spatialModel.state.snap,step:.25,align:state.settings.spatial3DAlignAssist!==false,alignTolerance:.14});
+      const alignment=model.activeAlignment;
+      diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;
+      diagnostic.alignmentX=alignment?.x?.source||null;diagnostic.alignmentY=alignment?.y?.source||null;
+      if(changed||alignment){sceneDirty=true;dirty=true;}return changed||Boolean(alignment);
+    }
+    const result=model.applyPrimaryControl(screenPoint,palmScale,{width:Math.max(1,cssWidth),height:Math.max(1,cssHeight)},{
+      mode,snap:spatialModel.state.snap,sensitivity:controlSensitivity(),now,sampleAt:primarySampleAt
+    });
+    if(result){
+      diagnostic.primaryYaw=result.yaw||0;diagnostic.primaryPitch=result.pitch||0;diagnostic.primaryDepth=result.depth||0;
+      diagnostic.primaryAxis=result.axis||"FREE";diagnostic.depthArmed=Boolean(result.armed);diagnostic.alignmentX=diagnostic.alignmentY=null;
+      if(result.rebased)diagnostic.lastReason=`PRIMARY ${diagnostic.primaryMode} · BASELINE`;
+      sceneDirty=true;dirty=true;return true;
+    }
+    return false;
+  }
   function canJoinManipulator(screenPoint){
     // V1.5.1 free-space controller: once an object is anchored, the second hand
     // may join from anywhere in the camera/viewport. Object hit-testing is no
@@ -808,14 +858,14 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     manipulator={handId:manipulatorArming.handId,lastPair:pair,lastSeenAt:performance.now(),recovering:false,recoveryUntil:null};
     diagnostic.manipulatorHandId=manipulator.handId;diagnostic.phase="MANIPULATOR";
     diagnostic.transformIntent = String(state.settings.spatial3DTransformMode || "auto").toUpperCase() === "AUTO" ? "WAITING" : String(state.settings.spatial3DTransformMode || "auto").toUpperCase();
-    diagnostic.scaleEvidence = diagnostic.rotateEvidence = 0;diagnostic.lastReason="FREE-SPACE MANIPULATOR";diagnostic.trackingGuard="READY";
+    diagnostic.scaleEvidence = diagnostic.rotateEvidence = 0;diagnostic.alignmentX=diagnostic.alignmentY=null;diagnostic.lastReason="FREE-SPACE MANIPULATOR";diagnostic.trackingGuard="READY";
     action("3D FREE-SPACE MANIPULATOR → "+manipulator.handId+" · "+diagnostic.transformIntent);manipulatorArming=null;sceneDirty=true;dirty=true;return true;
   }
   function updateManipulator(now){
     if(!anchor||!manipulator)return false;
     const pair=controlPair(manipulator.handId,now);if(!pair)return false;
     manipulator.lastPair=pair;manipulator.lastSeenAt=now;
-    const sensitivity = ({ low: 0.78, medium: 1, high: 1.22 })[state.settings.transformSensitivity] || 1;
+    const sensitivity = controlSensitivity();
     const result=model.applyManipulator(pair.primary,pair.secondary,{width:FREE_CONTROL_WIDTH,height:FREE_CONTROL_HEIGHT},{
       snap:spatialModel.state.snap, sensitivity, mode:state.settings.spatial3DTransformMode || "auto", now
     });
@@ -839,6 +889,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     if(manipulator)interaction.release(manipulator.handId,reason,false);if(!old.mouse&&old.handId)interaction.release(old.handId,reason,false);
     anchor=null;manipulator=null;manipulatorArming=null;mouseAnchor=false;diagnostic.anchorHandId=null;diagnostic.manipulatorHandId=null;diagnostic.phase=lost?"LOST":"IDLE";diagnostic.lastReason=reason;
     diagnostic.transformIntent="NONE";diagnostic.scaleEvidence=diagnostic.rotateEvidence=0;diagnostic.trackingGuard=lost?"ANCHOR LOST":"READY";
+    diagnostic.primaryMode=configuredPrimaryMode().toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.alignmentX=diagnostic.alignmentY=null;
     action((lost?"3D ANCHOR LOST → ":"3D OBJECT DROP → ")+old.objectId+(result?.changed?" · one edit committed":" · unchanged"));sceneDirty=true;dirty=true;return true;
   }
   function activeControl(){return{anchorHandId:anchor?.handId||null,manipulatorHandId:manipulator?.handId||manipulatorArming?.handId||null};}
@@ -867,10 +918,13 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
       }
       const object=model.get(anchor.objectId),plane=object?screenToPlane(primary.position,object.position.z):null;
       if(!plane||!model.rebaseAnchor(plane)){endPrimary("ANCHOR_REBASE_FAILED",true);return;}
+      const resumedMode=(manipulator||manipulatorArming)?"move":configuredPrimaryMode();
+      model.rebasePrimaryControl(primary.position,handPalmScale(anchor.handId),resumedMode);anchor.primaryMode=resumedMode;
+      diagnostic.primaryMode=resumedMode.toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;
       anchor.plane=plane;anchor.screen={...primary.position};anchor.recovering=false;anchor.recoveryUntil=null;anchor.lastGoodAt=now;anchor.resumedAt=now;
       diagnostic.trackingGuard="ANCHOR RESUMED";diagnostic.phase=manipulator?"MANIPULATOR":"ANCHOR";sceneDirty=true;dirty=true;
     }else{
-      anchor.lastGoodAt=now;moveAnchor(primary.position);
+      anchor.lastGoodAt=now;moveAnchor(primary.position,now,(manipulator||manipulatorArming)?"move":null);
       if(anchor.resumedAt!==null&&now-anchor.resumedAt>240&&diagnostic.trackingGuard==="ANCHOR RESUMED")diagnostic.trackingGuard="READY";
     }
 
@@ -947,14 +1001,15 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
       }else if(!handRecent(manipulator.handId,now))releaseManipulator("SECONDARY_LOST",true);
     }
   }
-  function cancel(){if(anchor)endPrimary("CANCELLED");else{manipulator=null;manipulatorArming=null;}controlFilters.clear();diagnostic.trackingGuard="READY";hoverId=null;sceneDirty=true;dirty=true;}
+  function cancel(){if(anchor)endPrimary("CANCELLED");else{manipulator=null;manipulatorArming=null;}controlFilters.clear();diagnostic.trackingGuard="READY";diagnostic.alignmentX=diagnostic.alignmentY=null;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.hoverHeld=false;hoverId=null;hoverLastHitAt=0;sceneDirty=true;dirty=true;}
   function resetTransform(){const id=model.selected?.id;if(model.resetTransform()){action("3D TRANSFORM RESET → "+id);sceneDirty=true;dirty=true;return true;}return false;}
   function adjustDepth(amount){const id=model.selected?.id;if(model.adjustDepth(amount)){action("3D DEPTH → "+id+" · "+model.selected.position.z.toFixed(2));sceneDirty=true;dirty=true;return true;}return false;}
   function adjustTransform(kind,axis,amount){
     const id=model.selected?.id;if(!id)return false;
+    const count=model.selectedIds.length;
     if(model.adjustTransform(kind,axis,amount)){
       const object=model.selected, label=kind==="position"?`${axis.toUpperCase()} ${object.position[axis].toFixed(2)}`:kind==="rotation"?`${axis.toUpperCase()} ${Math.round(object.rotation[axis])}°`:`${object.scale.x.toFixed(2)}×`;
-      action(`3D ${kind.toUpperCase()} → ${id} · ${label}`);sceneDirty=true;dirty=true;return true;
+      action(count>1?`3D GROUP ${kind.toUpperCase()} → ${count} OBJECTS · ${label}`:`3D ${kind.toUpperCase()} → ${id} · ${label}`);sceneDirty=true;dirty=true;return true;
     }return false;
   }
   function rename(value){const id=model.selected?.id;if(id&&model.setName(value)){action("3D RENAMED → "+id+" · "+model.selected.name);sceneDirty=true;dirty=true;return true;}return false;}
@@ -966,7 +1021,8 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     action("3D CAMERA FOCUS → "+object.id);render(performance.now(),true);return true;
   }
   function centerCamera(log=true){cameraFocus={x:0,y:0,z:0};applyCameraFocus();sceneDirty=true;dirty=true;if(log)action("3D CAMERA → SCENE CENTER");render(performance.now(),true);return true;}
-  function duplicate(){const object=model.duplicate();if(object){action("3D OBJECT DUPLICATED → "+object.id);sceneDirty=true;dirty=true;}return object;}
+  function duplicate(){const result=model.duplicate();if(result){const list=Array.isArray(result)?result:[result];action(list.length>1?`3D GROUP DUPLICATED → ${list.length} OBJECTS`:`3D OBJECT DUPLICATED → ${list[0].id}`);sceneDirty=true;dirty=true;}return result;}
+  function duplicateGroup(){const result=model.duplicateGroup();if(result){const list=Array.isArray(result)?result:[result];action(list.length>1?`3D GROUP DUPLICATED → ${list.length} OBJECTS`:`3D OBJECT DUPLICATED → ${list[0].id}`);sceneDirty=true;dirty=true;}return result;}
   function remove(){const id=model.selected?.id;if(id&&model.delete(id)){action("3D OBJECT DELETED → "+id);sceneDirty=true;dirty=true;return true;}return false;}
   function nodeStats(id){
     const root=nodes.get(id);if(!root)return{meshes:null,triangles:null};
@@ -986,6 +1042,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     for(const id of [...nodes.keys()]) disposeNode(id);
     diagnostic.selectedId=model.state.selected3DId; diagnostic.objectCount=model.objects.length;
     diagnostic.anchorHandId=null; diagnostic.manipulatorHandId=null; diagnostic.phase="IDLE";
+    diagnostic.primaryMode=configuredPrimaryMode().toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.alignmentX=diagnostic.alignmentY=null;diagnostic.hoverHeld=false;hoverLastHitAt=0;
     lastSelectionBoundsAt=0;lastSelectionBoundsId=null;
     sceneDirty=true; dirty=true; if(active) render(performance.now(),true);
   }
@@ -1011,8 +1068,8 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
   }
 
   function drawFallbackObject(object,now){
-    const geo=FALLBACK_GEOMETRIES[object.type]||FALLBACK_GEOMETRIES["holo-cube"],selected=object.id===model.state.selected3DId,hovered=object.id===hoverId;
-    const idle=!selected&&!anchor&&idleAllowed()&&["holo-orb","holo-globe","holo-ring","holo-knot","holo-beacon"].includes(object.type);
+    const geo=FALLBACK_GEOMETRIES[object.type]||FALLBACK_GEOMETRIES["holo-cube"],selected=object.id===model.state.selected3DId,grouped=!selected&&model.selectedIds.includes(object.id),hovered=object.id===hoverId;
+    const idle=!selected&&!grouped&&!anchor&&idleAllowed()&&["holo-orb","holo-globe","holo-ring","holo-knot","holo-beacon"].includes(object.type);
     const idleRotation=idle?Math.sin(now/2200+object.idlePhase)*4:0;
     const visual=idle?{...object,rotation:{...object.rotation,y:object.rotation.y+idleRotation}}:object;
     const verts=geo.vertices.map(v=>transformPoint(v,visual)),pts=verts.map(fallbackProject);
@@ -1021,20 +1078,35 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     const glow=clamp(Number(object.glow??.7),0,1), alpha=clamp(Number(object.opacity??.82),.15,1);
     if(geo.faces.length){const faces=geo.faces.map(face=>({face,z:face.reduce((s,i)=>s+verts[i].z,0)/face.length})).sort((a,b)=>a.z-b.z);
       for(const {face} of faces){overlayCtx.beginPath();face.forEach((i,n)=>n?overlayCtx.lineTo(pts[i].x,pts[i].y):overlayCtx.moveTo(pts[i].x,pts[i].y));overlayCtx.closePath();overlayCtx.fillStyle=`rgba(${color},${(selected?.09:.045)*alpha})`;overlayCtx.fill();}}
-    overlayCtx.lineCap="round";overlayCtx.lineJoin="round";overlayCtx.strokeStyle=`rgba(${color},${(selected?.98:hovered?.9:.56+.18*glow)*alpha})`;overlayCtx.lineWidth=selected?1.8:hovered?1.45:1;
+    overlayCtx.lineCap="round";overlayCtx.lineJoin="round";overlayCtx.strokeStyle=`rgba(${color},${(selected?.98:grouped?.92:hovered?.9:.56+.18*glow)*alpha})`;overlayCtx.lineWidth=selected?1.8:grouped?1.6:hovered?1.45:1;
     for(const [a,b] of geo.edges){overlayCtx.beginPath();overlayCtx.moveTo(pts[a].x,pts[a].y);overlayCtx.lineTo(pts[b].x,pts[b].y);overlayCtx.stroke();}
     if(object.type==="holo-orb"){const center=fallbackProject(object.position);overlayCtx.beginPath();overlayCtx.arc(center.x,center.y,Math.max(2,4.5*object.scale.x),0,Math.PI*2);overlayCtx.fillStyle="rgba(130,245,255,.72)";overlayCtx.fill();}
     if(object.type==="holo-image"||object.type==="holo-model"){const center=fallbackProject(object.position);overlayCtx.fillStyle=`rgba(${color},.82)`;overlayCtx.font="10px ui-monospace, monospace";overlayCtx.textAlign="center";overlayCtx.fillText(object.type==="holo-model"?"3D MODEL · WEBGL REQUIRED":"IMAGE HOLOGRAM",center.x,center.y);}
   }
-  function selectedScreenPoint() {
-    const object=model.selected;if(!object||object.visible===false)return null;
+  function screenPointForObject(object) {
+    if(!object||object.visible===false)return null;
     if(backend==="WEBGL"&&THREE&&camera3D){const v=new THREE.Vector3(object.position.x,object.position.y,object.position.z).project(camera3D);return{x:(v.x*.5+.5)*cssWidth,y:(-v.y*.5+.5)*cssHeight};}
     return fallbackProject(object.position);
   }
+  function selectedScreenPoint() { return screenPointForObject(model.selected); }
   function drawOverlay() {
     overlayCtx.setTransform(dpr,0,0,dpr,0,0);overlayCtx.clearRect(0,0,cssWidth,cssHeight);
     if(anchor&&manipulator){const pair=controlPair(manipulator.handId);if(pair){const a={x:pair.primary.x/FREE_CONTROL_WIDTH*cssWidth,y:pair.primary.y/FREE_CONTROL_HEIGHT*cssHeight},b={x:pair.secondary.x/FREE_CONTROL_WIDTH*cssWidth,y:pair.secondary.y/FREE_CONTROL_HEIGHT*cssHeight};overlayCtx.strokeStyle="rgba(91,228,255,.50)";overlayCtx.lineWidth=1;overlayCtx.setLineDash([4,5]);overlayCtx.beginPath();overlayCtx.moveTo(a.x,a.y);overlayCtx.lineTo(b.x,b.y);overlayCtx.stroke();overlayCtx.setLineDash([]);overlayCtx.font="10px ui-monospace, monospace";overlayCtx.textAlign="center";overlayCtx.fillStyle="rgba(154,242,255,.92)";overlayCtx.fillText("ANCHOR PALM",a.x,a.y-12);overlayCtx.fillText((diagnostic.transformIntent||"FREE HAND")+" · FREE",b.x,b.y-12);}}
-    if(backend==="WEBGL"&&model.selected){const p=selectedScreenPoint();if(p){overlayCtx.fillStyle="rgba(5,18,29,.82)";overlayCtx.fillRect(p.x-58,p.y+20,116,20);overlayCtx.fillStyle="#9af2ff";overlayCtx.font="10px ui-monospace, monospace";overlayCtx.textAlign="center";overlayCtx.fillText(model.selected.id+" · "+holoName(model.selected.type).replace("Holo ",""),p.x,p.y+34);}}
+    if(model.selected){const p=selectedScreenPoint();if(p){
+      if(anchor&&!manipulator){
+        const alignment=model.activeAlignment;
+        if(alignment&&(diagnostic.primaryMode||"MOVE")==="MOVE"){
+          overlayCtx.strokeStyle="rgba(102,235,255,.58)";overlayCtx.lineWidth=1;overlayCtx.setLineDash([6,5]);
+          if(alignment.x){overlayCtx.beginPath();overlayCtx.moveTo(p.x,6);overlayCtx.lineTo(p.x,cssHeight-6);overlayCtx.stroke();}
+          if(alignment.y){overlayCtx.beginPath();overlayCtx.moveTo(6,p.y);overlayCtx.lineTo(cssWidth-6,p.y);overlayCtx.stroke();}
+          overlayCtx.setLineDash([]);overlayCtx.fillStyle="rgba(4,24,36,.88)";overlayCtx.fillRect(p.x-74,p.y-52,148,18);overlayCtx.fillStyle="#a9f6ff";overlayCtx.font="9px ui-monospace, monospace";overlayCtx.textAlign="center";
+          const labels=[alignment.x?"X↔"+alignment.x.source:null,alignment.y?"Y↔"+alignment.y.source:null].filter(Boolean).join(" · ");overlayCtx.fillText("ALIGN · "+labels,p.x,p.y-39);
+        }
+        overlayCtx.fillStyle="rgba(5,18,29,.78)";overlayCtx.fillRect(p.x-64,p.y-30,128,18);overlayCtx.fillStyle="#8feeff";overlayCtx.font="9px ui-monospace, monospace";overlayCtx.textAlign="center";
+        const mode=diagnostic.primaryMode||"MOVE", suffix=mode==="ROTATE"&&diagnostic.primaryAxis!=="FREE"?" · "+diagnostic.primaryAxis:mode==="DEPTH"&&!diagnostic.depthArmed?" · ARMING":"";
+        overlayCtx.fillText("PRIMARY · "+mode+suffix,p.x,p.y-17);
+      }
+      overlayCtx.fillStyle="rgba(5,18,29,.82)";overlayCtx.fillRect(p.x-58,p.y+20,116,20);overlayCtx.fillStyle="#9af2ff";overlayCtx.font="10px ui-monospace, monospace";overlayCtx.textAlign="center";overlayCtx.fillText(model.selected.id+" · "+holoName(model.selected.type).replace("Holo ",""),p.x,p.y+34);}}
   }
 
   function render(now=performance.now(),force=false){
@@ -1049,13 +1121,16 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
     // Hover follows the visible aim ring, not a hidden filtered point ahead of
     // it. This fixes the subtle "cursor is here but another object highlights"
     // feeling that becomes obvious when low-FPS display resampling is active.
-    const previousHover=hoverId;hoverId=null;
+    const previousHover=hoverId;let nextHover=null;
     for(const p of Object.values(state.runtime.handPointers||{})){
       if(!p.visible||p.captureKind)continue;
       const aim=p.rendered||p.filtered;
       if(!aim)continue;
-      const hit=hitTest(aim,{padding:12});if(hit){hoverId=hit.id;break;}
+      const hit=hitTest(aim,{padding:12});if(hit){nextHover=hit.id;break;}
     }
+    if(nextHover){hoverId=nextHover;hoverLastHitAt=now;diagnostic.hoverHeld=false;}
+    else if(hoverId&&now-hoverLastHitAt<=140){diagnostic.hoverHeld=true;}
+    else {hoverId=null;diagnostic.hoverHeld=false;}
     if(previousHover!==hoverId)sceneDirty=true;
 
     // Pointer travel over empty space used to redraw the complete 3D scene even
@@ -1086,6 +1161,7 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
   function enter(){
     if(disposed)return;
     active=true;overlay.hidden=false;if(webglCanvas)webglCanvas.hidden=false;diagnostic.active=true;dirty=true;sceneDirty=true;
+    diagnostic.primaryMode=configuredPrimaryMode().toUpperCase();diagnostic.primaryYaw=diagnostic.primaryPitch=diagnostic.primaryDepth=0;diagnostic.primaryAxis="FREE";diagnostic.depthArmed=false;diagnostic.alignmentX=diagnostic.alignmentY=null;diagnostic.hoverHeld=false;
     // A previous CDN/loader failure should not permanently poison an imported model.
     // Re-entering Spatial retries failed model nodes while keeping successful nodes intact.
     for(const [id,node] of [...nodes.entries()]) if(node?.userData?.modelStatus==="ERROR") disposeNode(id);
@@ -1125,14 +1201,14 @@ export function createSpatial3D({ state, spatialModel, action, interaction, ui, 
   window?.addEventListener?.("resize",onResize);document?.addEventListener?.("fullscreenchange",onResize);
 
   return {
-    model,diagnostic,enter,exit,tick,render,hitTest,isPointNearSelected,canJoinManipulator,screenToPlane,create,createImage,createImportedModel,setAppearance,select,clearSelection,startPrimary,moveAnchor,startManipulator,releaseManipulator,endPrimary,update,watchdog,cancel,resetTransform,adjustDepth,adjustTransform,rename,toggleVisibility,toggleLocked,focusSelected,centerCamera,duplicate,remove,afterLoad,captureLayers,sceneStats,nodeStats,
+    model,diagnostic,enter,exit,tick,render,hitTest,isPointNearSelected,canJoinManipulator,screenToPlane,create,createImage,createImportedModel,setAppearance,select,toggleGroup,clearGroup,selectAllVisible,clearSelection,startPrimary,moveAnchor,startManipulator,releaseManipulator,endPrimary,update,watchdog,cancel,resetTransform,adjustDepth,adjustTransform,rename,toggleVisibility,toggleLocked,focusSelected,centerCamera,duplicate,duplicateGroup,remove,afterLoad,captureLayers,sceneStats,nodeStats,
     recover(error, reason="SPATIAL_3D_RECOVERY"){ fallBackFromWebGL(error, reason); render(performance.now(), true); return true; },
-    get holding(){return Boolean(anchor);},get anchorHandId(){return anchor?.handId||null;},get manipulatorHandId(){return manipulator?.handId||manipulatorArming?.handId||null;},get selected(){return model.selected;},activeControl,
+    get holding(){return Boolean(anchor);},get anchorHandId(){return anchor?.handId||null;},get manipulatorHandId(){return manipulator?.handId||manipulatorArming?.handId||null;},get selected(){return model.selected;},get selectedIds(){return model.selectedIds;},get selectedObjects(){return model.selectedObjects;},activeControl,
     modelStatus(id){const node=nodes.get(id);return node?.userData?.modelStatus||null;},
     modelError(id){const node=nodes.get(id);return node?.userData?.modelError||null;},
     importCapacity(assetId=null){return model.importCapacity(assetId);},
     get importedAssetCount(){return model.liveImportedAssetIds.size;},
-    setHover(point){hoverId=hitTest(point,{padding:12})?.id||null;sceneDirty=true;dirty=true;return hoverId;},
+    setHover(point){hoverId=hitTest(point,{padding:12})?.id||null;hoverLastHitAt=hoverId?performance.now():0;diagnostic.hoverHeld=false;sceneDirty=true;dirty=true;return hoverId;},
     tools:HOLO_TOOLS,isTool:isHoloTool,
     dispose(){
       if(disposed)return; disposed=true; cancel(); active=false;

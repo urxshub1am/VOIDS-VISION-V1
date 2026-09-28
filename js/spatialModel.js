@@ -33,7 +33,8 @@ const cloneSnapshot = snapshot => ({
   objects: copy(snapshot?.objects || []),
   selectedId: snapshot?.selectedId || null,
   objects3D: (snapshot?.objects3D || []).map(clone3DObject),
-  selected3DId: snapshot?.selected3DId || null
+  selected3DId: snapshot?.selected3DId || null,
+  selected3DIds: Array.isArray(snapshot?.selected3DIds) ? [...snapshot.selected3DIds] : (snapshot?.selected3DId ? [snapshot.selected3DId] : [])
 });
 const comparable3D = objects => (objects || []).map(object => {
   const cloned = clone3DObject(object);
@@ -133,7 +134,7 @@ export function portPosition(object, port) {
 
 export class SpatialModel {
   constructor() {
-    this.state = { objects: [], selectedId: null, objects3D: [], modelAssets: {}, selected3DId: null, tool: "select", zoom: 1, pan: { x: 0, y: 0 },
+    this.state = { objects: [], selectedId: null, objects3D: [], modelAssets: {}, selected3DId: null, selected3DIds: [], tool: "select", zoom: 1, pan: { x: 0, y: 0 },
       grid: true, snap: false, background: "dark", status: "READY", manipulation: null,
       editing: false, pendingDeleteId: null, pending3DDeleteId: null, undoCount: 0, redoCount: 0, revision: 0 };
     this.nextId = 1; this.past = []; this.future = []; this.transaction = null; this.drag = null;
@@ -143,7 +144,8 @@ export class SpatialModel {
   get(id) { return this.state.objects.find(o => o.id === id) || null; }
   snapshot() { return {
     objects: copy(this.state.objects), selectedId: this.state.selectedId,
-    objects3D: (this.state.objects3D || []).map(clone3DObject), selected3DId: this.state.selected3DId || null
+    objects3D: (this.state.objects3D || []).map(clone3DObject), selected3DId: this.state.selected3DId || null,
+    selected3DIds: Array.isArray(this.state.selected3DIds) ? [...this.state.selected3DIds] : (this.state.selected3DId ? [this.state.selected3DId] : [])
   }; }
   referencedModelAssetIds() {
     const ids = new Set();
@@ -494,7 +496,7 @@ export class SpatialModel {
     this.state.objects = copy(project.objects2D);
     this.state.objects3D = (project.objects3D || []).map(clone3DObject);
     this.state.modelAssets = cloneAssetRegistry(project.assets3D);
-    this.state.selectedId = null; this.state.selected3DId = null;
+    this.state.selectedId = null; this.state.selected3DId = null; this.state.selected3DIds = [];
     this.state.tool = "select";
     this.state.zoom = clamp(project.view?.zoom ?? 1, 0.5, 2.5);
     const requestedPan = { x: Number(project.view?.pan?.x) || 0, y: Number(project.view?.pan?.y) || 0 };

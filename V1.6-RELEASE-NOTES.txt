@@ -1,0 +1,21 @@
+VOIDS VISION V1.6 — Spatial Interaction Pro
+
+Status: STABLE
+
+Promoted from the user-tested V1.6 RC1 with no interaction-code changes after acceptance.
+
+Highlights:
+- one-hand 3D MOVE / ROTATE / DEPTH
+- restrained 3D Alignment Assist + guides
+- free-space second-hand Scale/Rotate with AUTO / SCALE / ROTATE / FREE modes
+- low-FPS tracking/reacquisition and pinch-safe adaptive aim from V1.5.4
+- 3D multi-selection and grouped-object feedback
+- group Move/Rotate/Scale and Duplicate Group
+- locked/hidden exclusion from group transforms
+- one Undo/Redo transaction per group edit
+- imported 3D model, Save/Load, PNG/SVG export and WebGL recovery safeguards
+
+Release validation:
+- V1.6 Phase 3 runtime tested successfully
+- RC1 full runtime acceptance passed
+- Stable promotion changes release labels/notes only; runtime JS/CSS remains identical to accepted RC1
