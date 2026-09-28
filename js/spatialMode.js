@@ -177,16 +177,22 @@ export function createSpatialMode(context) {
       paint(); render(); return "consume";
     }
     const handle = target.closest("[data-spatial-handle]")?.dataset.spatialHandle;
+    const activate3D = hit3D => {
+      if (!hit3D) return null;
+      markSelection(null); holo3D.select(hit3D.id);
+      if (hit3D.locked) { action("3D OBJECT SELECTED · LOCKED → " + hit3D.id); paint(); render(); return "consume"; }
+      const started3D = holo3D.startPrimary({ handId: event?.handId || null, screenPoint: position, now: event?.at || performance.now(), mouse: input === "mouse", objectId: hit3D.id });
+      if (started3D) { owner = input; paint(); render(); return "drag"; }
+      paint(); render(); return "consume";
+    };
+    // V1.6 selection priority: an exact visible 3D ray hit beats an overlapping
+    // 2D body. Explicit 2D resize/rotate handles still win so editing remains deterministic.
+    const exact3D = !handle && data.tool === "select" ? holo3D.hitTest(position, { padding: 0 }) : null;
+    if (exact3D) return activate3D(exact3D);
     const id = handle ? data.selectedId : target.closest("[data-spatial-object]")?.dataset.spatialObject;
     if (!id) {
-      const hit3D = holo3D.hitTest(position, { padding: 20 });
-      if (hit3D) {
-        markSelection(null); holo3D.select(hit3D.id);
-        if (hit3D.locked) { action("3D OBJECT SELECTED · LOCKED → " + hit3D.id); paint(); render(); return "consume"; }
-        const started3D = holo3D.startPrimary({ handId: event?.handId || null, screenPoint: position, now: event?.at || performance.now(), mouse: input === "mouse" });
-        if (started3D) { owner = input; paint(); render(); return "drag"; }
-        paint(); render(); return "consume";
-      }
+      const result3D = activate3D(holo3D.hitTest(position, { padding: 20 }));
+      if (result3D) return result3D;
       markSelection(null); holo3D.clearSelection(); paint(); render(); return "consume";
     }
     holo3D.clearSelection(); markSelection(id);
@@ -422,7 +428,8 @@ export function createSpatialMode(context) {
   function render3DSceneList() {
     if (!scene3DList) return;
     const selectedId = data.selected3DId || null;
-    const key = (data.objects3D || []).map(object => [object.id, object.name || holoName(object.type), object.visible === false ? 0 : 1, object.locked ? 1 : 0, object.id === selectedId ? 1 : 0].join(":" )).join("|");
+    const grouped = new Set(holo3D.selectedIds || []);
+    const key = (data.objects3D || []).map(object => [object.id, object.name || holoName(object.type), object.visible === false ? 0 : 1, object.locked ? 1 : 0, object.id === selectedId ? 1 : 0, grouped.has(object.id) ? 1 : 0].join(":" )).join("|");
     if (key === scene3DKey) return;
     scene3DKey = key; scene3DList.replaceChildren();
     const objects = data.objects3D || [];
@@ -430,33 +437,46 @@ export function createSpatialMode(context) {
       const empty = document.createElement("p"); empty.className = "spatial-scene-empty"; empty.textContent = "No 3D objects yet."; scene3DList.append(empty); return;
     }
     for (const object of [...objects].reverse()) {
-      const row = document.createElement("div"); row.className = "spatial-scene-row"; row.dataset.selected = String(object.id === selectedId);
+      const row = document.createElement("div"); row.className = "spatial-scene-row"; row.dataset.selected = String(object.id === selectedId); row.dataset.grouped = String(grouped.has(object.id));
       const select = document.createElement("button"); select.type = "button"; select.className = "spatial-scene-select"; select.dataset.action = "spatial-3d-select"; select.dataset.value = object.id; select.setAttribute("data-gesture-target", "");
       const title = document.createElement("strong"); title.textContent = object.name || holoName(object.type);
       const meta = document.createElement("span"); meta.textContent = `${object.id} · ${holoName(object.type).replace("Holo ", "")}`; select.append(title, meta);
+      const group = document.createElement("button"); group.type = "button"; group.className = "button spatial-scene-icon spatial-scene-group"; group.dataset.action = "spatial-3d-group-toggle"; group.dataset.value = object.id; group.setAttribute("data-gesture-target", ""); group.setAttribute("aria-label", `${grouped.has(object.id) ? "Remove" : "Add"} ${object.name || object.id} ${grouped.has(object.id) ? "from" : "to"} group selection`); group.setAttribute("aria-pressed", String(grouped.has(object.id))); group.textContent = grouped.has(object.id) ? "GROUP ✓" : "GROUP";
       const visibility = document.createElement("button"); visibility.type = "button"; visibility.className = "button spatial-scene-icon"; visibility.dataset.action = "spatial-3d-scene-visibility"; visibility.dataset.value = object.id; visibility.setAttribute("data-gesture-target", ""); visibility.setAttribute("aria-label", `${object.visible === false ? "Show" : "Hide"} ${object.name || object.id}`); visibility.setAttribute("aria-pressed", String(object.visible !== false)); visibility.textContent = object.visible === false ? "SHOW" : "EYE";
       const lock = document.createElement("button"); lock.type = "button"; lock.className = "button spatial-scene-icon"; lock.dataset.action = "spatial-3d-scene-lock"; lock.dataset.value = object.id; lock.setAttribute("data-gesture-target", ""); lock.setAttribute("aria-label", `${object.locked ? "Unlock" : "Lock"} ${object.name || object.id}`); lock.setAttribute("aria-pressed", String(Boolean(object.locked))); lock.textContent = object.locked ? "LOCK" : "FREE";
-      row.append(select, visibility, lock); scene3DList.append(row);
+      row.append(select, group, visibility, lock); scene3DList.append(row);
     }
   }
 
   function render() {
     ensurePalette();
     const selected = model.selected, selected3D = holo3D.selected;
+    const selected3DObjects = holo3D.selectedObjects || [];
+    const selected3DCount = selected3DObjects.length;
+    const transformable3DCount = selected3DObjects.filter(object => object.visible !== false && !object.locked).length;
     const optionalText = (id, value) => { if (ui.element(id)) ui.setText(id, value); };
     ui.setText("spatial-workspace-status", state.runtime.paused ? "PAUSED" : data.editing ? (document.activeElement === name3DInput ? "EDITING 3D NAME" : "EDITING TEXT") : data.status);
-    ui.setText("spatial-selected-name", selected ? selected.id + " · " + nameOf(selected.type) : selected3D ? selected3D.id + " · " + (selected3D.name || holoName(selected3D.type)) : "No object selected");
+    ui.setText("spatial-selected-name", selected ? selected.id + " · " + nameOf(selected.type) : selected3D ? (selected3DCount > 1 ? `${selected3D.id} · ${selected3D.name || holoName(selected3D.type)} · GROUP ${selected3DCount}` : selected3D.id + " · " + (selected3D.name || holoName(selected3D.type))) : "No object selected");
     ui.setText("spatial-object-count", data.objects.length + " 2D · " + (data.objects3D?.length || 0) + " 3D");
     render3DSceneList();
     const sceneStats = holo3D.sceneStats();
     optionalText("spatial-3d-scene-stats", `${sceneStats.visible}/${sceneStats.objects} visible · ${sceneStats.locked} locked${sceneStats.triangles == null ? "" : ` · ${sceneStats.meshes} meshes · ${sceneStats.triangles.toLocaleString()} tri`}`);
+    optionalText("spatial-3d-group-value", selected3DCount ? `${selected3DCount} selected · ${transformable3DCount} transformable` : "0 selected");
+    optionalText("spatial-3d-primary-mode", String(state.settings.spatial3DPrimaryMode || "move").toUpperCase());
+    const alignmentBits = [holo3D.diagnostic.alignmentX ? `X↔${holo3D.diagnostic.alignmentX}` : null,
+      holo3D.diagnostic.alignmentY ? `Y↔${holo3D.diagnostic.alignmentY}` : null].filter(Boolean);
+    optionalText("spatial-3d-align-value", `${state.settings.spatial3DAlignAssist !== false ? "ON" : "OFF"} · ${alignmentBits.length ? alignmentBits.join(" · ") : "--"}`);
     optionalText("spatial-3d-gesture-mode", String(state.settings.spatial3DTransformMode || "auto").toUpperCase());
     optionalText("spatial-3d-gesture-status", holo3D.holding
       ? (holo3D.diagnostic.trackingGuard && holo3D.diagnostic.trackingGuard !== "READY"
-        ? holo3D.diagnostic.trackingGuard : (holo3D.diagnostic.transformIntent || "MOVE"))
+        ? holo3D.diagnostic.trackingGuard
+        : holo3D.diagnostic.manipulatorHandId ? (holo3D.diagnostic.transformIntent || "WAITING")
+        : "PRIMARY " + (holo3D.diagnostic.primaryMode || "MOVE"))
       : "IDLE");
     for (const button of panel.querySelectorAll('[data-preference="spatial3DTransformMode"]'))
       attributes(button, { "aria-pressed": String(button.dataset.value === (state.settings.spatial3DTransformMode || "auto")) });
+    for (const button of panel.querySelectorAll('[data-preference="spatial3DPrimaryMode"]'))
+      attributes(button, { "aria-pressed": String(button.dataset.value === (state.settings.spatial3DPrimaryMode || "move")) });
     ui.setText("spatial-tool-name", data.tool === "select" ? "SELECT / GRAB" : data.tool === "pan" ? "PAN VIEW" : "PLACE → " + (isHoloTool(data.tool) ? holoName(data.tool) : nameOf(data.tool)).toUpperCase());
     ui.setText("spatial-zoom-value", Math.round(data.zoom * 100) + "%");
     const control = holo3D.holding ? holo3D.diagnostic : data.twoHand, cursorData = data.pointers;
@@ -475,9 +495,16 @@ export function createSpatialMode(context) {
           : holo3D.diagnostic.manipulatorHandId
             ? intent3D === "WAITING" ? "FREE HAND JOINED · move deliberately to choose SCALE or ROTATE"
             : `3D ${intent3D} LOCKED · free hand controls transform · Anchor moves XY`
-            : "3D ANCHOR LOCKED · pinch other hand anywhere to transform");
-      ui.setText("spatial-two-hand-values", holo3D.diagnostic.manipulatorHandId ? holo3D.diagnostic.scaleRatio.toFixed(2) + "× · Y " + Math.round(holo3D.diagnostic.yaw) + "° · P " + Math.round(holo3D.diagnostic.pitch) + "° · R " + Math.round(holo3D.diagnostic.roll) + "°" : "");
-      ui.setText("spatial-transform-intent", holo3D.diagnostic.manipulatorHandId ? "3D " + intent3D : "3D MOVE");
+            : holo3D.diagnostic.primaryMode === "DEPTH"
+              ? "3D PRIMARY DEPTH · move the pinching hand toward / away from camera · second hand may still join"
+              : holo3D.diagnostic.primaryMode === "ROTATE"
+                ? "3D PRIMARY ROTATE · drag the pinching hand to yaw / pitch · second hand may still join"
+                : "3D PRIMARY MOVE · drag in X/Y · pinch other hand anywhere to transform");
+      const primary3DValues = holo3D.diagnostic.primaryMode === "ROTATE"
+        ? `Y ${Math.round(holo3D.diagnostic.primaryYaw || 0)}° · P ${Math.round(holo3D.diagnostic.primaryPitch || 0)}°`
+        : holo3D.diagnostic.primaryMode === "DEPTH" ? `ΔZ ${(holo3D.diagnostic.primaryDepth || 0).toFixed(2)}` : "";
+      ui.setText("spatial-two-hand-values", holo3D.diagnostic.manipulatorHandId ? holo3D.diagnostic.scaleRatio.toFixed(2) + "× · Y " + Math.round(holo3D.diagnostic.yaw) + "° · P " + Math.round(holo3D.diagnostic.pitch) + "° · R " + Math.round(holo3D.diagnostic.roll) + "°" : primary3DValues);
+      ui.setText("spatial-transform-intent", holo3D.diagnostic.manipulatorHandId ? "3D " + intent3D : "3D " + (holo3D.diagnostic.primaryMode || "MOVE"));
       ui.setText("spatial-transform-size", selected3D ? selected3D.scale.x.toFixed(2) + "× · Z " + selected3D.position.z.toFixed(2) : "--");
     } else {
       ui.setText("spatial-both-pinch", ["SECONDARY_ARMING", "WORKSPACE_ARMING"].includes(control.phase) ? "ARMING " + Math.round(control.progress * 100) + "%"
@@ -495,7 +522,9 @@ export function createSpatialMode(context) {
     for (const button of panel.querySelectorAll('[data-action="spatial-tool"]')) attributes(button, { "aria-pressed": String(data.tool === button.dataset.value) });
     for (const button of panel.querySelectorAll("[data-spatial-selected]")) button.disabled = !selected;
     for (const button of panel.querySelectorAll("[data-spatial-3d-selected]")) button.disabled = !selected3D;
-    for (const button of panel.querySelectorAll("[data-spatial-3d-transform]")) button.disabled = !selected3D || Boolean(selected3D?.locked) || selected3D?.visible === false;
+    for (const button of panel.querySelectorAll("[data-spatial-3d-transform]")) button.disabled = !selected3D || transformable3DCount === 0;
+    const groupClear = panel.querySelector('[data-action="spatial-3d-group-clear"]'); if (groupClear) groupClear.disabled = selected3DCount <= 1;
+    const groupDuplicate = panel.querySelector('[data-action="spatial-3d-group-duplicate"]'); if (groupDuplicate) groupDuplicate.disabled = selected3DCount <= 1 || (data.objects3D?.length || 0) + selected3DCount > 24;
     const focus3D = panel.querySelector('[data-action="spatial-3d-focus"]');
     if (focus3D) focus3D.disabled = !selected3D || selected3D.visible === false;
     ui.element("spatial-arrows").disabled = !selected || !isLine(selected);
@@ -917,8 +946,12 @@ export function createSpatialMode(context) {
     else if (name === "spatial-zoom-in" || name === "spatial-zoom-out") { if (model.zoom(data.zoom + (name.endsWith("in") ? 0.25 : -0.25))) action("ZOOM → " + Math.round(data.zoom * 100) + "%"); }
     else if (name === "spatial-reset-view") { model.resetView(); holo3D.centerCamera(false); action("ZOOM → 100% / PAN RESET / 3D CENTER"); }
     else if (name === "spatial-3d-select" && value) { holo3D.select(value); action("3D OBJECT SELECTED → " + value); }
-    else if (name === "spatial-3d-scene-visibility" && value) { holo3D.select(value); holo3D.toggleVisibility(); }
-    else if (name === "spatial-3d-scene-lock" && value) { holo3D.select(value); holo3D.toggleLocked(); }
+    else if (name === "spatial-3d-group-toggle" && value) { const ids = holo3D.toggleGroup(value); action(`3D GROUP SELECTION → ${ids.length} OBJECT${ids.length === 1 ? "" : "S"}`); }
+    else if (name === "spatial-3d-group-all") { const ids = holo3D.selectAllVisible(); action(`3D GROUP SELECTED → ${ids.length} VISIBLE OBJECT${ids.length === 1 ? "" : "S"}`); }
+    else if (name === "spatial-3d-group-clear") { if (holo3D.clearGroup()) action("3D GROUP CLEARED → PRIMARY ONLY"); }
+    else if (name === "spatial-3d-group-duplicate") { const result = holo3D.duplicateGroup(); if (!result) notify("Not enough 3D object capacity to duplicate this group.", "warning"); }
+    else if (name === "spatial-3d-scene-visibility" && value) { holo3D.select(value, { preserveGroup: true }); holo3D.toggleVisibility(); }
+    else if (name === "spatial-3d-scene-lock" && value) { holo3D.select(value, { preserveGroup: true }); holo3D.toggleLocked(); }
     else if (name === "spatial-3d-rename" && selected3D && name3DInput) { if (!holo3D.rename(name3DInput.value)) name3DInput.value = selected3D.name || holoName(selected3D.type); }
     else if (name === "spatial-3d-visibility" && selected3D) holo3D.toggleVisibility();
     else if (name === "spatial-3d-lock" && selected3D) holo3D.toggleLocked();

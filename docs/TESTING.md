@@ -1,6 +1,6 @@
-# Testing VOIDS VISION V1
+# Testing VOIDS VISION V1.6
 
-## Browser acceptance test
+## Final browser acceptance test
 
 Use the latest Chrome or Edge with a webcam and even front/side lighting.
 
@@ -11,10 +11,10 @@ Use the latest Chrome or Edge with a webcam and even front/side lighting.
 5. Verify Presentation swipe navigation and index-finger laser pointer.
 6. Verify Gesture Lab telemetry and tracking-loss recovery.
 7. Verify Challenge scoring.
-8. In Spatial/Holo, add multiple 2D and 3D objects, move them, use two-hand Anchor/Manipulator interaction, and test undo/redo.
+8. In Spatial/Holo, add multiple 2D and 3D objects. Test Phase 3 GROUP multi-selection, group Move/Rotate/Scale, one-step Undo/Redo and group duplicate; then re-test direct one-hand and two-hand Anchor/Manipulator interaction.
 9. Save a workspace, change it, reload the JSON, and confirm the scene restores.
 10. Test PNG/SVG export, fullscreen, mode switching and a 10–20 minute stability run.
 
 ## Notes
 
-Actual tracking quality depends on webcam delivery, lighting and device performance. Automated logic tests do not replace a real webcam/GPU/browser acceptance test.
+Actual tracking quality depends on webcam delivery, lighting and device performance. Automated logic tests do not replace a real webcam/GPU/browser acceptance test. Treat any new red console exception, unexplained WebGL→Canvas fallback, object jump on reacquisition, or broken Undo/Redo transaction as release-blocking for V1.6.

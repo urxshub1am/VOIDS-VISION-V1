@@ -1236,7 +1236,7 @@ function initialize() {
       case "dual-ui-toggle": setPrecisionPreference("dualHandUI", !state.settings.dualHandUI); break;
       case "adaptive-toggle": setPrecisionPreference("adaptiveSmoothing", !state.settings.adaptiveSmoothing); break;
       case "spatial-preference-toggle":
-        if (["spatialDualPointer", "magneticAimAssist"].includes(control.dataset.preference)) {
+        if (["spatialDualPointer", "magneticAimAssist", "spatial3DAlignAssist"].includes(control.dataset.preference)) {
           setPrecisionPreference(control.dataset.preference, !state.settings[control.dataset.preference]);
         }
         break;

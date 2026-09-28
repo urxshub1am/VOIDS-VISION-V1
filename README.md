@@ -1,4 +1,89 @@
 # VOIDS VISION
+## V1.6 — Spatial Interaction Pro
+
+V1.6 is the stable Spatial Interaction Pro release promoted from the user-tested RC1. The runtime feature set is unchanged from RC1; this release locks the validated one-hand, two-hand, alignment, multi-selection, group-transform, persistence, import, and low-FPS recovery work into the production checkpoint.
+
+### V1.6 final feature set
+
+- **One-hand 3D primary control:** MOVE, ROTATE and DEPTH with low-FPS-aware filtering, deliberate Depth arming, optional snapping and safe rebase after tracking gaps.
+- **Two-hand free-space transforms:** the Anchor keeps object translation while a second pinching hand can join from free space for AUTO / SCALE / ROTATE / FREE manipulation.
+- **Restrained 3D Alignment Assist:** optional center/object X/Y alignment during one-hand MOVE with live alignment guides.
+- **3D multi-selection:** primary + grouped secondary objects, Group visible / Clear group, visible transformable-count feedback and distinct grouped rendering.
+- **Group editing:** precise Move X/Y/Z, Rotate X/Y/Z, Scale and Duplicate Group while preserving relative layout; locked/hidden members are excluded from transforms.
+- **History safety:** each group edit/duplicate is one Undo/Redo transaction. Imported model/image references retain the V1.4.1 memory and portability safeguards.
+- **Runtime hardening retained:** V1.5.4 adaptive aim smoothing, pinch-safe cursor behavior, tracking reacquisition, selective WebGL fallback, palette recovery and performance-aware rendering remain preserved.
+- **Compatibility preserved:** Pointer, Air Draw, Presentation, Gesture Lab, Challenge, Save/Load and exports remain part of the same browser-only V1 architecture.
+
+### V1.6 release acceptance gate
+
+1. Run through Home → Pointer → Air Draw → Presentation → Gesture Lab → Challenge → Spatial/Holo without reloading the page.
+2. Repeat pointer pinch/release, tracking loss/reacquisition and low-FPS aim checks; confirm no new console error and no false Canvas fallback.
+3. In Spatial/Holo, verify one-hand MOVE / ROTATE / DEPTH, Alignment Assist ON/OFF, second-hand AUTO Scale/Rotate and release/rejoin behavior.
+4. Verify multi-select/group Move/Rotate/Scale, locked/hidden exclusion, Duplicate Group and one-step Undo/Redo.
+5. Import a supported GLB, Save workspace, alter the scene, Load it back, then test PNG/SVG export and fullscreen.
+6. Leave the app running for 10–20 minutes while switching modes and interacting. Confirm stable camera/tracker state and acceptable performance.
+7. Test in current Chrome or Edge over localhost/HTTPS. This gate passed on the release candidate before promotion to stable `v1.6`.
+
+## Development history
+
+### V1.6 DEV — Spatial Interaction Pro · Phase 3
+
+Phase 3 builds directly on the user-tested Phase 2 candidate. It adds a conservative multi-object editing layer without changing the gesture acquisition, low-FPS tracking, alignment, one-hand Rotate/Depth, or free-space second-hand rules that were already working acceptably.
+
+### V1.6 Phase 3 changes
+
+- **3D multi-selection:** every Scene Object row now has a gesture-target `GROUP` toggle. The active object remains the primary selection while additional objects can stay grouped. `Group visible` and `Clear group` provide fast selection management.
+- **True group precise transforms:** existing Move X/Y/Z, Rotate X/Y/Z and Scale controls now act on all visible, unlocked grouped objects. Translation preserves relative spacing; group rotation pivots positions around the group center; scale expands/contracts positions around the group center while scaling every member.
+- **One Undo step per group edit:** each group transform is committed as one history transaction, so Undo/Redo restores the whole operation together rather than object-by-object.
+- **Group duplicate:** `Duplicate group` and Ctrl/Cmd+D clone the current 3D multi-selection in one edit, preserve relative layout, share existing imported-model/image payload references safely, unlock the copies, and select the new duplicate group.
+- **Locked/hidden safety:** locked or hidden selected members remain selected but are excluded from group transforms. The property panel reports both selected count and transformable count.
+- **Grouped-object feedback:** Scene Object rows and 3D rendering distinguish the active primary object from secondary grouped members.
+- **Gesture-safe design:** group-management and precise transform controls remain normal `data-gesture-target` controls, so pinch activation works without introducing a new global gesture that could conflict with grab/transform logic. Direct Anchor / free-space two-hand manipulation intentionally continues to control the active primary object only in Phase 3.
+- **Phase 2 preserved:** restrained Alignment Assist, live guides, cross-axis Rotate damping, deliberate Depth arming and hover retention remain unchanged.
+
+### V1.6 Phase 3 runtime check
+
+1. Add three 3D objects. Use the `GROUP` buttons so two or three rows are marked grouped; the property readout should show the same selected count.
+2. Use Move X/Y/Z. All visible unlocked grouped objects should move together and preserve spacing. Press Undo once: the entire group move should revert in one step.
+3. Use Rotate Z (then X/Y). Group members should rotate together around the group center while each object's own rotation changes by the same increment.
+4. Use Scale +/−. The group should expand/contract around its center and each member should scale uniformly.
+5. Lock one grouped object and repeat a Move/Rotate/Scale step. The locked member must stay fixed while unlocked grouped members change. Hide one member and confirm it is also excluded.
+6. Press `Duplicate group` (or Ctrl/Cmd+D). A full duplicate set should appear offset slightly, keep its relative layout, and become the new group selection. One Undo should remove the whole duplicate set.
+7. Re-test Phase 2 critical paths: one-hand MOVE/ROTATE/DEPTH, Alignment Assist, low-FPS hover retention, second-hand free-space AUTO Scale/Rotate, tracking freeze→rebase→resume, imported GLB, Save/Load and PNG export.
+
+## V1.6 DEV — Spatial Interaction Pro · Phase 2
+
+Phase 2 builds directly on the runtime-tested V1.6 Phase 1 candidate. It keeps the verified V1.5.4 tracking/recovery foundation and the Phase 1 one-hand MOVE / ROTATE / DEPTH controls, then focuses on interaction feel rather than adding another large feature surface.
+
+### V1.6 Phase 2 changes
+
+- **3D Alignment Assist:** a persisted `3D alignment assist` preference is ON by default. During one-hand MOVE, an object can magnetically align its center to scene X/Y center or another visible 3D object's X/Y center when it enters a small world-space tolerance. This is intentionally restrained and does not resize or rotate the object.
+- **Live alignment guides:** when alignment engages, the Spatial overlay shows dashed X/Y guides plus the matched target (`CENTER` or an object ID). The 3D property panel and Gesture Lab diagnostics expose the same alignment state.
+- **One-hand rotation cross-axis damping:** deliberate horizontal motion favors yaw and deliberate vertical motion favors pitch; weak perpendicular webcam wobble is strongly reduced while genuine diagonal motion remains free.
+- **Deliberate Depth arming:** DEPTH now requires two fresh same-direction tracking samples beyond a small palm-scale threshold before it activates. The depth baseline is rebased at the arm point so activation does not kick the object forward/back.
+- **3D hover retention:** a short ~140 ms retain window keeps a valid 3D hover highlight through a brief raycast miss, reducing target flicker at low tracking FPS without inventing a new hit.
+- **Phase 1 preserved:** one-hand MOVE / ROTATE / DEPTH, snap-aware transforms, exact 3D-first surface selection, safe free-space second-hand Scale/Rotate, one Undo transaction per Anchor session, imported-model safeguards, Save/Load, and WebGL recovery remain intact.
+
+### V1.6 Phase 2 runtime check
+
+1. Keep `3D alignment assist` ON. In Spatial/Holo, add two 3D objects. MOVE one near the other object's X or Y center and near scene center. The object should align only when close; dashed guides should identify `X↔...` / `Y↔...`.
+2. Turn `3D alignment assist` OFF in Settings and repeat. MOVE must become fully free except for normal `Snap ON` quantization.
+3. Choose ROTATE. Move mostly left/right and confirm yaw dominates without visible pitch wobble; move mostly up/down and confirm pitch dominates. Deliberate diagonal movement should still rotate both axes.
+4. Choose DEPTH. Tiny palm-size jitter should not move Z. Move the whole hand clearly toward or away from the camera and hold for two fresh tracking samples; the HUD should arm, then continued motion should move depth without an activation jump.
+5. At low tracking FPS, move the aim across a 3D object's edge. The hover highlight may hold briefly through a one-frame miss but must release after leaving the object.
+6. Re-test Phase 1 and V1.5.4 critical paths: second-hand free-space join, AUTO Scale/Rotate, tracking-loss freeze→rebase→resume, pinch release, imported GLB, Undo/Redo, Save/Load, Tools palette recovery and PNG export.
+
+## V1.6 DEV — Spatial Interaction Pro · Phase 1
+
+Phase 1 introduced one-hand 3D primary modes while preserving the stable V1.5.4 gesture acquisition rules.
+
+- **MOVE:** normal X/Y object drag with optional 3D movement snap.
+- **ROTATE:** one-hand yaw/pitch rotation with smoothing and optional 15° snap.
+- **DEPTH:** palm-size-driven Z movement without requiring the Manipulator hand.
+- **Safe dual-hand handoff:** the second hand can join anywhere as the free-space Manipulator; while it is active the Anchor safely returns to MOVE, then the selected one-hand mode rebases on resume.
+- **3D-first exact selection:** exact visible 3D ray hits win over overlapping 2D bodies while explicit 2D handles keep priority.
+- **Expanded telemetry:** primary one-hand and secondary two-hand transforms are reported separately.
+
 ## V1.5.4 — Adaptive Motion Smoothing
 
 V1.5.4 is a smoothness-focused patch built from V1.5.3. It keeps the runtime crash/fallback fixes and makes low-FPS pointing feel less sticky: the pointer now stabilizes fingertip aim against the palm, freezes the learned fingertip offset while pinching so finger curl does not kick the cursor, and visually resamples sparse webcam updates between inference frames. Spatial 3D also avoids expensive full-scene/material work when only the pointer moves, while active hand transforms receive lightweight display interpolation.

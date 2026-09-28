@@ -336,11 +336,16 @@ export function createUI(events) {
       setText("spatial-diag-resize", position(control?.resizeDelta));
       setText("spatial-diag-preferences", (state.settings.spatialDualPointer !== false ? "ON" : "OFF") + " / " +
         (state.settings.magneticAimAssist !== false ? "ON" : "OFF") + " / " + (state.settings.transformSensitivity || "medium") +
-        " / 3D " + String(state.settings.spatial3DTransformMode || "auto").toUpperCase());
+        " / ALIGN " + (state.settings.spatial3DAlignAssist !== false ? "ON" : "OFF") +
+        " / PRIMARY " + String(state.settings.spatial3DPrimaryMode || "move").toUpperCase() +
+        " / SECONDARY " + String(state.settings.spatial3DTransformMode || "auto").toUpperCase());
       const holo = state.runtime.modeData.spatial3D;
       setText("spatial-diag-3d-selected", holo?.selectedId ? holo.selectedId + " / " + (workspace?.objects3D?.find(o => o.id === holo.selectedId)?.type || "--") : "--");
       setText("spatial-diag-3d-control", holo ? holo.phase + " / " + (holo.anchorHandId || "--") + " / " + (holo.manipulatorHandId || "--") + " / " + (holo.trackingGuard || "READY") : "--");
-      setText("spatial-diag-3d-transform", holo ? (holo.transformIntent || "NONE") + " · " + number(holo.scaleRatio, 2) + "× / " + number(holo.yaw, 1) + "° / " + number(holo.pitch, 1) + "° / " + number(holo.roll, 1) + "°" : "--");
+      setText("spatial-diag-3d-transform", holo ? "P " + (holo.primaryMode || "MOVE") + " " + number(holo.primaryYaw, 1) + "° / " + number(holo.primaryPitch, 1) + "° / ΔZ " + number(holo.primaryDepth, 2) +
+        (holo.primaryMode === "ROTATE" ? " / " + (holo.primaryAxis || "FREE") : holo.primaryMode === "DEPTH" ? " / " + (holo.depthArmed ? "ARMED" : "ARMING") :
+          (holo.alignmentX || holo.alignmentY) ? " / ALIGN " + [holo.alignmentX ? "X↔" + holo.alignmentX : null, holo.alignmentY ? "Y↔" + holo.alignmentY : null].filter(Boolean).join(" ") : "") +
+        " · S " + (holo.transformIntent || "NONE") + " " + number(holo.scaleRatio, 2) + "× / " + number(holo.yaw, 1) + "° / " + number(holo.pitch, 1) + "° / " + number(holo.roll, 1) + "°" : "--");
       setText("spatial-diag-3d-evidence", holo ? number(holo.scaleEvidence, 3) + " / " + number(holo.rotateEvidence, 3) : "--");
       setText("spatial-diag-3d-performance", holo ? number(holo.renderFps, 1) + " FPS / " + (holo.backend || "--") + " / " + holo.quality + " / " + holo.objectCount : "--");
 
@@ -635,7 +640,8 @@ export function createUI(events) {
     setText("adaptive-setting", "Adaptive smoothing · " + (settings.adaptiveSmoothing ? "ON" : "OFF"));
     byId("adaptive-setting").setAttribute("aria-pressed", String(settings.adaptiveSmoothing));
     for (const [id, key, label] of [["dual-ui-setting", "dualHandUI", "Dual hand UI"], ["spatial-dual-setting", "spatialDualPointer", "Spatial dual pointer"],
-      ["spatial-magnetic-setting", "magneticAimAssist", "Magnetic aim assist"]]) {
+      ["spatial-magnetic-setting", "magneticAimAssist", "Magnetic aim assist"],
+      ["spatial-align3d-setting", "spatial3DAlignAssist", "3D alignment assist"]]) {
       const enabled = settings[key] !== false;
       setText(id, label + " · " + (enabled ? "ON" : "OFF")); byId(id).setAttribute("aria-pressed", String(enabled));
     }

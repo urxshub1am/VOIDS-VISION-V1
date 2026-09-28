@@ -1,8 +1,8 @@
 // Coordinate filtering only. Gesture rules and pinch confirmation stay in gestureEngine.js.
 export const PRECISION_DEFAULTS = Object.freeze({
   pointerPrecision: "normal", adaptiveSmoothing: true, scrollSensitivity: "medium",
-  dualHandUI: true, spatialDualPointer: true, magneticAimAssist: true, transformSensitivity: "medium",
-  spatial3DTransformMode: "auto"
+  dualHandUI: true, spatialDualPointer: true, magneticAimAssist: true, spatial3DAlignAssist: true, transformSensitivity: "medium",
+  spatial3DTransformMode: "auto", spatial3DPrimaryMode: "move"
 });
 export function validatePrecisionPreferences(value) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -10,6 +10,7 @@ export function validatePrecisionPreferences(value) {
   for (const [key, fallback] of Object.entries(PRECISION_DEFAULTS)) {
     const choices = key === "pointerPrecision" ? ["normal", "high"]
       : key === "spatial3DTransformMode" ? ["auto", "scale", "rotate", "free"]
+      : key === "spatial3DPrimaryMode" ? ["move", "rotate", "depth"]
       : ["low", "medium", "high"];
     result[key] = typeof fallback === "boolean" ? (typeof input[key] === "boolean" ? input[key] : fallback)
       : choices.includes(input[key]) ? input[key] : fallback;
